@@ -4,14 +4,15 @@ import time
 import datetime
 import blocks_download
 # from blocks_download import progress_callback
+from datetime import datetime, timezone
 import blocks_extractor
 import wallets_update
 import files_checker
 import database_tool
 from datetime import datetime
-from blocks_download import main, get_latest_block_number, get_block_timestamp, load_block_numbers, save_block_data_to_json
+from blocks_download import main, get_latest_block_number, get_block_timestamp, load_block_numbers, save_block_data_to_json, get_timestamp_of_last_block_before_date
 
-
+import asyncio
 import blocks_remover
 # import interface
 import sys
@@ -53,95 +54,6 @@ if __name__ == "__main__":
 
 
 
-
-
-
-
-
-
-
-
-    # def get_timestamp_of_last_block_before_date(target_date):
-    #     # Konwertuj docelową datę na timestamp
-    #     target_timestamp = int(datetime.strptime(target_date, "%Y-%m-%d").timestamp())
-
-    #     # Pobierz najnowszy numer bloku
-    #     latest_block_number = get_latest_block_number()
-
-    #     # Określ zakres początkowy i końcowy wyszukiwania
-    #     start_block_number = latest_block_number
-    #     end_block_number = 0
-
-    #     # Rozpocznij przeszukiwanie
-    #     while start_block_number >= end_block_number:
-    #         # Sprawdź środkowy blok w zakresie
-    #         mid_block_number = (start_block_number + end_block_number) // 2
-    #         mid_block_timestamp = get_block_timestamp(hex(mid_block_number))
-
-    #         # Wypisz numer środkowego bloku
-    #         print(f"Checking block number: {mid_block_number}")
-
-    #         # Jeśli środkowy blok ma datę późniejszą, zmniejsz zakres o połowę
-    #         if mid_block_timestamp >= target_timestamp:
-    #             start_block_number = mid_block_number - 1
-    #         # Jeśli środkowy blok ma datę wcześniejszą, sprawdź poprzednie bloki w zakresie
-    #         else:
-    #             # Sprawdź datę poprzedniego bloku
-    #             prev_block_timestamp = get_block_timestamp(hex(mid_block_number - 1))
-    #             # Sprawdź czy poprzedni blok ma datę wcześniejszą
-    #             if prev_block_timestamp < target_timestamp:
-    #                 # Sprawdź czy godzina to 23:59
-    #                 if datetime.utcfromtimestamp(prev_block_timestamp).strftime('%H:%M') == "23:59":
-    #                     return prev_block_timestamp
-    #             # W przeciwnym razie, zmniejsz zakres do lewej połowy
-    #             end_block_number = mid_block_number + 1
-
-    #     # Jeśli nie znaleziono bloku z poprzedzającą datą i godziną 23:59, zwróć None
-    #     return None
-
-    def get_timestamp_of_last_block_before_date(target_date):
-        # Konwertuj docelową datę na timestamp
-        # target_timestamp = int(datetime.strptime(target_date, "%Y-%m-%d").timestamp())
-        target_timestamp = int(datetime.strptime(target_date + " 23:59", "%Y-%m-%d %H:%M").timestamp())
-
-
-        # Pobierz najnowszy numer bloku
-        latest_block_number = get_latest_block_number()
-
-        # Określ zakres początkowy i końcowy wyszukiwania
-        start_block_number = latest_block_number
-        end_block_number = 0
-
-        # Licznik iteracji (dodany w celu śledzenia liczby iteracji)
-        iterations = 0
-
-        # Rozpocznij przeszukiwanie
-        while start_block_number >= end_block_number:
-            iterations += 1
-            # Sprawdź środkowy blok w zakresie
-            mid_block_number = (start_block_number + end_block_number) // 2
-            mid_block_timestamp = get_block_timestamp(hex(mid_block_number))
-
-            # Wypisz numer środkowego bloku i jego timestamp
-            print(f"Checking block number: {mid_block_number}, Timestamp: {mid_block_timestamp}")
-
-            # Jeśli środkowy blok ma datę późniejszą, zmniejsz zakres o połowę
-            if mid_block_timestamp >= target_timestamp:
-                start_block_number = mid_block_number - 1
-            # W przeciwnym razie, zwiększ zakres o połowę
-            else:
-                end_block_number = mid_block_number + 1
-
-        # Wypisz liczbę iteracji (do debugowania)
-        print("Total iterations:", iterations)
-
-        # Jeśli nie znaleziono bloku z daną datą, zwróć None
-        return start_block_number + 1
-
-
-
-
-
     print()
     print("1. Pobierz dane z bloków")
     print("2. Twórz raport godzinowy")
@@ -162,14 +74,14 @@ if __name__ == "__main__":
 
     if choice == "1":
 
-        num_blocks = 10      
+        num_blocks = 500
         blocks_download.main(num_blocks)
-
+        # asyncio.run(blocks_download.main(num_blocks))
 
     elif choice == "2":
 
 
-        extract_date = "2024-05-27 00:00:00"
+        extract_date = "2024-06-04 00:00:00"
             # Utwórz obiekt profilera
         profiler = cProfile.Profile()
         
