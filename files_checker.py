@@ -2,15 +2,12 @@ import os
 import sqlite3
 import json
 
-
 current_directory = os.path.dirname(__file__)
 
 db_filename = os.path.join(current_directory, 'baza_danych.db')
 wallets_activity_filename = os.path.join(current_directory, 'interesting_info', 'Biggest_wallets_activity.json')
 
-
 def check_files():
-
     if not os.path.exists(db_filename):
             conn = sqlite3.connect(db_filename)
             cursor = conn.cursor()
@@ -48,12 +45,10 @@ def check_files():
                     UNIQUE(wallet_address, date)
                 )
             ''')
-
         
             conn.commit()
             conn.close()
             print(f'Baza danych "{db_filename}" i tabela zostały utworzone.')
-
 
     if not os.path.exists(wallets_activity_filename):
             with open(wallets_activity_filename, 'w') as json_file:
@@ -62,5 +57,3 @@ def check_files():
             print(f'Plik "{wallets_activity_filename}" został utworzony z pustym słownikiem.')
 
     return True
-
-  
