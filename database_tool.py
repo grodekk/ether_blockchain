@@ -3,11 +3,11 @@ import json
 from datetime import datetime
 import os
 
+
 current_directory = os.path.dirname(__file__)
-# DATABASE_PATH = os.path.join(os.path.dirname(__file__), "baza_danych.db")
+
 
 def save_biggest_wallets_activity_database(input_file_name, db_filename):
-
     input_file_path = os.path.join(current_directory, "interesting_info", input_file_name)  
 
     conn = sqlite3.connect(db_filename)
@@ -65,9 +65,6 @@ def save_biggest_wallets_activity_database(input_file_name, db_filename):
 
 
 def table_data_calculations(entry, cursor, data_type):
-        
-      
-
         date = entry.get('time', None)           
         transactions_number = entry.get('transactions number', None)        
         average_transaction_fee = entry.get('average transaction fee', None)
@@ -103,16 +100,12 @@ def table_data_calculations(entry, cursor, data_type):
             ''', (
                 data_type, date, hour, transactions_number, average_transaction_fee,
                 *wallet_values
-            ))
-    
-
+            ))    
      
 
-def import_data_to_combined_table(input_file_name, db_filename, data_type, progress_callback=None):
-
+def import_data_to_combined_table(input_file_name, db_filename, data_type, progress_callback=None, check_interrupt=None):
     input_file_path = os.path.join(current_directory, "interesting_info", input_file_name)  
-    
-    
+        
     conn = sqlite3.connect(db_filename)
     cursor = conn.cursor()
 
@@ -130,8 +123,7 @@ def import_data_to_combined_table(input_file_name, db_filename, data_type, progr
     conn.close()
 
 
-def print_combined_data_by_type(db_filename, data_type):
-    
+def print_combined_data_by_type(db_filename, data_type):    
     conn = sqlite3.connect(db_filename)
     cursor = conn.cursor()
 
@@ -161,7 +153,6 @@ def print_combined_data_by_type(db_filename, data_type):
 
 
 def read_and_display_data_from_database(db_filename):
-
     conn = sqlite3.connect(db_filename)
     conn.row_factory = sqlite3.Row  
     cursor = conn.cursor()
@@ -190,8 +181,7 @@ def read_and_display_data_from_database(db_filename):
         print("Top Buy Date:", top_buy_date)
         print("Top Sell Amount:", top_sell_amount)
         print("Top Sell Date:", top_sell_date)
-        print("\n")
-    
+        print("\n")    
 
     conn.commit()
     conn.close()
@@ -220,3 +210,23 @@ def check_date_in_database(selected_date, chart_name, sql_query_check, DATABASE_
         if connection:
             connection.close()
 
+
+def remove_invalid_entries(db_filename):
+    conn = sqlite3.connect(db_filename)
+    cursor = conn.cursor()    
+    
+    cursor.execute('''
+        DELETE FROM combined_data
+        WHERE (transactions_number IS NULL OR transactions_number = 0)
+        AND (average_transaction_fee IS NULL OR average_transaction_fee = 0)
+        AND (wallet_0_1_eth = 0)
+        AND (wallet_1_10_eth = 0)
+        AND (wallet_10_100_eth = 0)
+        AND (wallet_100_1000_eth = 0)
+        AND (wallet_0_1_to_1_eth = 0)
+        AND (wallet_above_10000_eth = 0)
+        AND (wallet_1000_10000_eth = 0)
+    ''')
+    
+    conn.commit()
+    conn.close()
