@@ -4,14 +4,12 @@ import json
 
 current_directory = os.path.dirname(__file__)
 
-
 def update_top_wallets_info(top_wallets_info, new_data, data):
     for wallet_data in new_data:
         address = wallet_data["wallet adress"]
         balance = wallet_data["wallet balance"]
         transaction_amount = wallet_data["biggest transaction amount in ether"]
         transaction_type = wallet_data["biggest transaction type(buy/sell)"]
-
 
         if address in top_wallets_info:
             existing_balance_entries = [entry for entry in top_wallets_info[address]["balance_history"] if entry["date"] == data["time"]]
@@ -52,8 +50,7 @@ def update_top_wallets_info(top_wallets_info, new_data, data):
             }
 
 
-def save_top_wallets_info(input_file_name, progress_callback=None):
-
+def save_top_wallets_info(input_file_name, progress_callback=None, check_interrupt=None):
     input_file_path = os.path.join(current_directory, "interesting_info", input_file_name)  
     output_file_path = os.path.join(current_directory, "interesting_info", "Biggest_wallets_activity.json")  
 
@@ -70,11 +67,5 @@ def save_top_wallets_info(input_file_name, progress_callback=None):
 
     with open(output_file_path, 'w') as output_file:
         json.dump(top_wallets_info, output_file, indent=4)
-    
-
 
     print("zaaktualizowane dane portfeli!")
-
-    
-
-
