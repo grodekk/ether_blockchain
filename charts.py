@@ -3,6 +3,7 @@ import mplcursors
 from matplotlib.patches import FancyArrowPatch
 from matplotlib.patches import FancyBboxPatch
 from PyQt5.QtWidgets import QDateEdit
+from datetime import datetime
 
 
 chart_config = {
@@ -138,8 +139,7 @@ chart_config = {
             "title": "Saldo ETH TOP 1 portfela",
             "ylabel": "Saldo w ETH",
         },
-        "TOP 2 PORTFEL": {
-            # "sql_query": 'SELECT date, SUM(balance) AS total_balance FROM wallet_balance GROUP BY wallet_address ORDER BY total_balance DESC LIMIT 1 OFFSET 1',
+        "TOP 2 PORTFEL": {            
             "sql_query": '''SELECT wb.date, wb.balance
                             FROM wallet_balance AS wb
                             WHERE wb.wallet_address = (
@@ -157,8 +157,7 @@ chart_config = {
             "title": "Saldo w ETH TOP 2 portfela",
             "ylabel": "Saldo w ETH",
         },
-        "TOP 3 PORTFEL": {
-            # "sql_query": 'SELECT date, SUM(balance) AS total_balance FROM wallet_balance GROUP BY wallet_address ORDER BY total_balance DESC LIMIT 1 OFFSET 2',
+        "TOP 3 PORTFEL": {            
             "sql_query": '''SELECT wb.date, wb.balance
                             FROM wallet_balance AS wb
                             WHERE wb.wallet_address = (
@@ -176,8 +175,7 @@ chart_config = {
             "title": "Saldo ETH TOP 3 portfela",
             "ylabel": "Saldo w ETH",
         },
-        "TOP 4 PORTFEL": {
-            # "sql_query": 'SELECT date, SUM(balance) AS total_balance FROM wallet_balance GROUP BY wallet_address ORDER BY total_balance DESC LIMIT 1 OFFSET 3',
+        "TOP 4 PORTFEL": {            
             "sql_query": '''SELECT wb.date, wb.balance
                             FROM wallet_balance AS wb
                             WHERE wb.wallet_address = (
@@ -195,8 +193,7 @@ chart_config = {
             "title": "Saldo ETH TOP 4 portfela",
             "ylabel": "Saldo w ETH",
         },
-        "TOP 5 PORTFEL": {
-            # "sql_query": 'SELECT date, SUM(balance) AS total_balance FROM wallet_balance GROUP BY wallet_address ORDER BY total_balance DESC LIMIT 1 OFFSET 4',
+        "TOP 5 PORTFEL": {            
             "sql_query": '''SELECT wb.date, wb.balance
                         FROM wallet_balance AS wb
                         WHERE wb.wallet_address = (
@@ -230,18 +227,18 @@ class ChartHandler:
         self.canvas.draw()
            
 
-    def chart_builder(self, sql_query, label, title, ylabel):
-        
-      
+    def chart_builder(self, sql_query, label, title, ylabel):      
         conn = sqlite3.connect(self.db_filename)
         cursor = conn.cursor()
         cursor.execute(sql_query)
-        data = cursor.fetchall()
-      
+        data = cursor.fetchall()      
 
-        data_x = [row[0] for row in data]
+        data_x = [row[0] for row in data]        
         data_y = [row[1] for row in data]
-
+         
+        sorted_indices = sorted(range(len(data_x)), key=lambda i: data_x[i])
+        data_x = [data_x[i] for i in sorted_indices]
+        data_y = [data_y[i] for i in sorted_indices]
 
         fig = self.canvas.figure
         ax = fig.add_subplot(111)
@@ -267,11 +264,9 @@ class ChartHandler:
                 
             self.current_annotation = annotation
             
-            annotation.set_text(f'Data: {x}\n\n{label}: {y}')
-                    
+            annotation.set_text(f'Data: {x}\n\n{label}: {y}')                    
 
             if len(data_x) >= 2:
-
                 x_shift = 0.125 * len(data_x)
                 if ind >= len(data_x) // 2:
                     ha = 'right'
@@ -281,8 +276,7 @@ class ChartHandler:
    
             else:
                 ha = 'left'
-                x_shift = 0.01 * len(data_x)
-                
+                x_shift = 0.01 * len(data_x)                
 
             bbox_props = dict(
                 boxstyle='square,pad=1',
@@ -298,8 +292,7 @@ class ChartHandler:
                 ec='r',                
                 )
                                 
-            annotation.set_bbox(bbox_props)     
-                   
+            annotation.set_bbox(bbox_props)                        
             annotation.set_fontsize(10)
             annotation.set_fontweight('normal')
             annotation.set_fontfamily('Arial')
@@ -309,9 +302,8 @@ class ChartHandler:
             annotation.set_va('center')
             annotation.set_visible(True)
             line.set_alpha(0.3)
-            scatter.set_alpha(0.1)
-            
-            annotation.arrow_patch.set(**arrow_props)  # Zaktualizuj właściwości strzałki 
+            scatter.set_alpha(0.1)            
+            annotation.arrow_patch.set(**arrow_props)
             
            
         def on_move(event):
@@ -339,25 +331,7 @@ class ChartHandler:
         ax.set_xticks(visible_xticks)
         ax.set_xticklabels([data_x[i] for i in visible_xticks_indices])
 
+        fig.autofmt_xdate()
         self.canvas.draw()    
     
-        conn.close()
-
-    def plot_top_wallets_activity(self):
-
-       
-            sql_query = '''
-                SELECT date, balance, wallet_address 
-                FROM wallet_balance 
-                WHERE wallet_address IN (
-                    SELECT wallet_address 
-                    FROM wallet_balance 
-                    ORDER BY balance DESC 
-                    LIMIT 5
-                ) 
-                ORDER BY date
-            '''
-
-            label = "Aktywność portfeli"
-            title = "Aktywność portfeli dla top 5 największych sald"
-            ylabel = "Saldo portfela"
+        conn.close() 
