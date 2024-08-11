@@ -22,17 +22,17 @@ class BlockInput:
     def get_num_blocks_to_fetch(method="console"):
         if method == "console":
             try:
-                return int(input("Wprowadź ilość bloków do pobrania: ")), True
+                return int(input("Wprowadź ilość bloków do pobrania: "))
             except ValueError:
                 print("Zła wartość, wpisz liczbę całkowitą!")
-                return None, False
+                return None
                 
         elif method == "interface":
             num_blocks, ok_pressed = QInputDialog.getInt(None, "Ilość bloków", "Wprowadź ilość bloków do pobrania:")
             if ok_pressed:
-                return num_blocks, True
+                return num_blocks
             else:
-                return None, False
+                return None
                 
         else:
             raise ValueError("Zła metoda, użyj konsoli lub interfejsu")
@@ -42,33 +42,54 @@ class EtherAPI:
     def __init__(self, config):
         self.config = config
 
-    def get_latest_block_number(self):
-        response = requests.get(f"{self.config.API_URL}?module=proxy&action=eth_blockNumber&apikey={self.config.API_KEY}")
-        if response.status_code == 200:
-            data = response.json()
-            return int(data.get("result", "0"), 16)
-        else:
-            print("Failed to fetch data from the API.")
-            return 0
+    def _get_response(self, url):
+        try:
+            response = requests.get(url)            
+            if response.status_code >= 400:                
+                raise ConnectionError(f"HTTP error occurred: {response.status_code} - {response.reason}")
+            return response
+        except requests.RequestException as e:           
+            raise ConnectionError(f"Request failed: {e}")
 
+    def get_latest_block_number(self):
+        url = f"{self.config.API_URL}?module=proxy&action=eth_blockNumber&apikey={self.config.API_KEY}"
+        response = self._get_response(url)
+        data = response.json()
+        result = data.get("result", None)               
+        block_number = result
+        if not result:
+            raise ValueError("Empty result for block number.")            
+        try:
+            return int(block_number, 16)
+        except ValueError:
+            raise ValueError(f"Invalid timestamp format: {timestamp}")
+            
     def get_block_timestamp(self, block_number):  
-        response = requests.get(f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}")
-        if response.status_code == 200:        
-            data = response.json()       
-            return int(data.get("result", {}).get("timestamp", 0), 16)
-        else:
-            print(f"Failed to fetch block {block_number} data from the API.")
-            return 0
+        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"
+        response = self._get_response(url)
+        data = response.json()
+        result = data.get("result", {})
+        timestamp = result.get("timestamp", None)   
+        if not result:
+            raise ValueError("Empty result for block timestamp.")
+        if not timestamp:
+            raise ValueError("Empty timestamp in result.")    
+        try:
+            return int(timestamp, 16)
+        except ValueError:
+            raise ValueError(f"Invalid timestamp format: {timestamp}")
 
     def get_block_transactions(self, block_number):    
-        response = requests.get(f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}")
-        if response.status_code == 200:
-            data = response.json()      
-            transactions = data.get("result", {}).get("transactions", [])       
-            return transactions
-        else:
-            print(f"Failed to fetch block {block_number} data from the API.")
-            return []
+        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"
+        response = self._get_response(url)
+        data = response.json()
+        result = data.get("result", {})
+        transactions = result.get("transactions", []) 
+        if not result:
+            raise ValueError("Empty result for block transactions.")
+        if not transactions:
+            raise ValueError("Empty transactions for result.")    
+        return transactions
 
 
 class BlocksManager:
@@ -259,7 +280,7 @@ class MainBlockProcessor:
     def __init__(self, config):
         self.config = config
         self.api = EtherAPI(config)
-        self.blocks_manager = BlocksManager(self.api, config)               
+        self.blocks_manager = BlocksManager(self.api, self.config)               
         if not os.path.exists(self.config.BLOCKS_DATA_DIR):
             os.makedirs(self.config.BLOCKS_DATA_DIR)
 
@@ -318,10 +339,8 @@ class MainBlockProcessor:
 
 if __name__ == "__main__":
     config = Config()
-    block_processor = MainBlockProcessor(config)    
-   
-    block_numbers_or_num_blocks = 10 
-   
+    block_processor = MainBlockProcessor(config)       
+    BlockInput.get_num_blocks_to_fetch()   
     block_processor.run(
         block_numbers_or_num_blocks,
         progress_callback=lambda total, current: print(f"Postęp: {current}/{total}"),
