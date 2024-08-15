@@ -3,58 +3,65 @@ import json
 import heapq
 from datetime import datetime, timedelta
 import time
-from blocks_download import download_single_block
+from blocks_download import BlocksManager, Config, EtherAPI
 from json.decoder import JSONDecodeError
-
-current_directory = os.path.dirname(__file__)
-input_folder = os.path.join(current_directory, 'blocks_data')
 
 def extract_block_data(file_path):
     with open(file_path, 'r') as file:
         block_data = json.load(file)
     return block_data
+    
+
+class BlockFileProcessor:
+    def __init__(self, blocks_manager):
+        self.blocks_manager = blocks_manager
+        
+    def load_block_data(self, json_file):
+        try:
+            with open(os.path.join(Config.BLOCKS_DATA_DIR, json_file), 'r') as file:
+                block_data = json.load(file)
+            return block_data
+        except JSONDecodeError:
+            print(f"Plik {json_file} jest pusty lub uszkodzony. Próba pobrania brakujących danych.")
+            block_number = int(json_file.split('_')[1].split('.')[0])           
+            fetched_block_numbers = []
+            self.blocks_manager.download_single_block(block_number, fetched_block_numbers)
+            with open(os.path.join(Config.BLOCKS_DATA_DIR, json_file), 'r') as file:
+                block_data = json.load(file)
+            return block_data
 
 
-def group_transactions_by_hour(input_folder, json_files, progress_callback=None, check_interrupt=None):
+class TransactionsGrouper:
+    def __init__(self, block_file_processor):
+        self.block_file_processor = block_file_processor        
+        self.transactions_by_hour = {}
 
-        transactions_by_hour = {}
+    def group_transactions_by_hour(self, progress_callback=None, check_interrupt=None):
+            transactions_by_hour = {}
+            total_files = len(Config.JSON_FILES)
+            processed_files = 0            
 
-        total_files = len(json_files)
-        processed_files = 0
+            for json_file in Config.JSON_FILES:
+                block_data = self.block_file_processor.load_block_data(json_file)
 
-        for json_file in json_files:
-            try:
-                with open(os.path.join(input_folder, json_file), 'r') as file:
-                    print(f'funkcja gtbh - processing{json_file}')
-                    block_data = json.load(file)
+                if check_interrupt and check_interrupt():
+                    print('rozwaloned')
+                    break
 
-            except JSONDecodeError:
-                    print(f"Plik {json_file} jest pusty lub uszkodzony. Próba pobrania brakujących danych.")                    
-                    block_number = int(json_file.split('_')[1].split('.')[0])
-                    fetched_block_numbers = []
-                    download_single_block(block_number, fetched_block_numbers)               
+                processed_files += 1
+                progress_value = processed_files                
+                if progress_callback:
+                    progress_callback(total_files, progress_value) 
                 
-                    with open(os.path.join(input_folder, json_file), 'r') as file:
-                        block_data = json.load(file)
+                block_timestamp = int(block_data["timestamp"])
+                hour = datetime.utcfromtimestamp(block_timestamp).strftime("%Y-%m-%d %H:00:00")
+                transactions = block_data["transactions"]
+                if hour not in self.transactions_by_hour:
+                    self.transactions_by_hour[hour] = []
+                self.transactions_by_hour[hour].extend(transactions)
 
-            if check_interrupt and check_interrupt():
-                print('rozwaloned')
-                break
-
-            processed_files += 1
-            progress_value = processed_files                
-            if progress_callback:
-                progress_callback(total_files, progress_value) 
-            
-            block_timestamp = int(block_data["timestamp"])
-            hour = datetime.utcfromtimestamp(block_timestamp).strftime("%Y-%m-%d %H:00:00")
-            transactions = block_data["transactions"]
-            if hour not in transactions_by_hour:
-                transactions_by_hour[hour] = []
-            transactions_by_hour[hour].extend(transactions)
-
-        return transactions_by_hour
-   
+            return self.transactions_by_hour
+    
 
 def classify_wallet(balance):
     if balance >= 10000:
@@ -172,17 +179,18 @@ def process_and_save_transactions(transactions_for_hour,
             return result_data
 
 
-def extract_hourly_data(extract_date, progress_callback=None, check_interrupt=None):
-
-    input_folder = os.path.join(current_directory, 'blocks_data')      
-    json_files = [file for file in os.listdir(input_folder) if file.endswith(".json")]  
-
-    transactions_by_hour = group_transactions_by_hour(input_folder, json_files, progress_callback, check_interrupt=check_interrupt)     
+def extract_hourly_data(extract_date, progress_callback=None, check_interrupt=None):            
+    config = Config()
+    api = EtherAPI(config)
+    blocks_manager = BlocksManager(api, config)
+    block_file_processor = BlockFileProcessor(blocks_manager)
+    transactions_grouper = TransactionsGrouper(block_file_processor)
+    transactions_by_hour = transactions_grouper.group_transactions_by_hour(progress_callback, check_interrupt=check_interrupt)   
+    
     start_hour = datetime.strptime(extract_date, "%Y-%m-%d %H:%M:%S")
     hourly_results_all = []  
     current_hour = start_hour
     hourly_mode = True
-
 
     while current_hour.hour <= 23:
         end_hour_dt = current_hour + timedelta(hours=1)
@@ -192,8 +200,17 @@ def extract_hourly_data(extract_date, progress_callback=None, check_interrupt=No
 
         transactions_for_hour = transactions_by_hour.get(start_hour_str, [])
 
-        wallets_transactions = {}
-        wallets_balances = {classify_wallet(i): 0 for i in range(8)}
+        wallets_transactions = {}        
+        wallets_balances = {
+                                "Above 10000 ETH": 0,
+                                "1000-10000 ETH": 0,
+                                "100-1000 ETH": 0,
+                                "10-100 ETH": 0,
+                                "1-10 ETH": 0,
+                                "0.1-1 ETH": 0,
+                                "0.1 ETH": 0
+                            }
+
         total_transactions = 0
         total_fees = 0
         
@@ -209,16 +226,18 @@ def extract_hourly_data(extract_date, progress_callback=None, check_interrupt=No
     date_part = start_hour.strftime("%Y-%m-%d")
     output_folder = "interesting_info"
     os.makedirs(output_folder, exist_ok=True)
-    output_file_path = os.path.join(current_directory, output_folder, f"{date_part}_hourly_data.json")
+    output_file_path = os.path.join(Config.CURRENT_DIRECTORY, output_folder, f"{date_part}_hourly_data.json")
     with open(output_file_path, 'w') as output_file:
         json.dump(hourly_results_all, output_file, indent=4)
 
 
-def extract_daily_data(extract_date, progress_callback=None, check_interrupt=None):
-    input_folder = os.path.join(current_directory, 'blocks_data')
-    json_files = [file for file in os.listdir(input_folder) if file.endswith(".json")]
-
-    transactions_by_hour = group_transactions_by_hour(input_folder, json_files, progress_callback, check_interrupt=check_interrupt) 
+def extract_daily_data(extract_date, progress_callback=None, check_interrupt=None):   
+    config = Config()
+    api = EtherAPI(config)
+    blocks_manager = BlocksManager(api, config)
+    block_file_processor = BlockFileProcessor(blocks_manager)
+    transactions_grouper = TransactionsGrouper(block_file_processor)
+    transactions_by_hour = transactions_grouper.group_transactions_by_hour(progress_callback, check_interrupt=check_interrupt)   
     transactions_for_day = []
 
     start_hour = datetime.strptime(extract_date, "%Y-%m-%d %H:%M:%S")
@@ -234,8 +253,17 @@ def extract_daily_data(extract_date, progress_callback=None, check_interrupt=Non
     hourly_results_all = None
     current_hour = None
 
-    wallets_transactions = {}
-    wallets_balances = {classify_wallet(i): 0 for i in range(8)}
+    wallets_transactions = {}    
+    wallets_balances = {
+                            "Above 10000 ETH": 0,
+                            "1000-10000 ETH": 0,
+                            "100-1000 ETH": 0,
+                            "10-100 ETH": 0,
+                            "1-10 ETH": 0,
+                            "0.1-1 ETH": 0,
+                            "0.1 ETH": 0
+                        }
+
     total_transactions = 0
     total_fees = 0
              
@@ -247,6 +275,6 @@ def extract_daily_data(extract_date, progress_callback=None, check_interrupt=Non
     date_part = start_hour.strftime("%Y-%m-%d")    
     output_folder = "interesting_info"
     os.makedirs(output_folder, exist_ok=True)
-    output_file_path = os.path.join(current_directory, output_folder, f"{date_part}_daily_data.json")
+    output_file_path = os.path.join(Config.CURRENT_DIRECTORY, output_folder, f"{date_part}_daily_data.json")
     with open(output_file_path, 'w') as output_file:
         json.dump(result_data, output_file, indent=4)   
