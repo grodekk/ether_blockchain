@@ -9,7 +9,6 @@ import wallets_update
 import files_checker
 import database_tool
 from datetime import datetime
-from blocks_download import main, get_latest_block_number, get_block_timestamp, load_block_numbers, save_block_data_to_json, get_timestamp_of_last_block_on_target_date
 import asyncio
 import blocks_remover
 import sys
@@ -17,7 +16,6 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QMenuBar, QVBoxL
 import sqlite3
 import cProfile
 from datetime import datetime
-import automation
 
 if __name__ == "__main__":
     current_directory = os.path.dirname(__file__)
@@ -45,17 +43,19 @@ if __name__ == "__main__":
     print()
 
     if choice == "1":
-        profiler = cProfile.Profile()    
-        num_blocks = 10
-        profiler.run("blocks_download.main(num_blocks)")
-        profiler.print_stats(sort='cumulative')
+        num_blocks = blocks_download.BlockInput.get_num_blocks_to_fetch()
+        
+        if num_blocks is not None:
+            print(num_blocks)            
+            main_app = blocks_download.MainBlockProcessor(blocks_download.Config())
+            main_app.run(num_blocks)
 
     elif choice == "2":
-        extract_date = "2024-06-04 00:00:00"               
+        extract_date = "2024-08-08 00:00:00"               
         blocks_extractor.extract_hourly_data(extract_date)            
 
     elif choice == "3":
-        extract_date = "2024-02-21 00:00:00"
+        extract_date = "2024-08-08 00:00:00"
         blocks_extractor.extract_daily_data(extract_date)
     
     elif choice == "4":
