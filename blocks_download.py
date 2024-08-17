@@ -15,6 +15,7 @@ class Config:
     REQUEST_DELAY = 0.2
     BLOCKS_DATA_DIR = os.path.join(CURRENT_DIRECTORY, 'blocks_data')
     BLOCKS_DATA_FILE = os.path.join(CURRENT_DIRECTORY, 'blocks_data.json')
+    JSON_FILES = [file for file in os.listdir(BLOCKS_DATA_DIR) if file.endswith(".json")]  
 
 
 class BlockInput:
@@ -22,16 +23,26 @@ class BlockInput:
     def get_num_blocks_to_fetch(method="console"):
         if method == "console":
             try:
-                return int(input("Wprowadź ilość bloków do pobrania: "))
-            except ValueError:
-                print("Zła wartość, wpisz liczbę całkowitą!")
+                user_input = input("Wprowadź ilość bloków do pobrania: ")
+                num_blocks = int(user_input)
+                if num_blocks <= 0:
+                    raise ValueError("Liczba bloków musi być większa niż 0.")                    
+                return num_blocks
+            except ValueError as e:
+                print(f"Zła wartość, wpisz liczbę całkowitą! ({e})")
                 return None
                 
         elif method == "interface":
-            num_blocks, ok_pressed = QInputDialog.getInt(None, "Ilość bloków", "Wprowadź ilość bloków do pobrania:")
-            if ok_pressed:
-                return num_blocks
-            else:
+            try:
+                num_blocks, ok_pressed = QInputDialog.getInt(None, "Ilość bloków", "Wprowadź ilość bloków do pobrania:")
+                if ok_pressed:
+                    if num_blocks <= 0:
+                        raise ValueError("Liczba bloków musi być większa niż 0.")                        
+                    return num_blocks
+                else:
+                    return None
+            except Exception as e:
+                print(f"Problem z interfejsem: {e}")
                 return None
                 
         else:
@@ -55,14 +66,13 @@ class EtherAPI:
         url = f"{self.config.API_URL}?module=proxy&action=eth_blockNumber&apikey={self.config.API_KEY}"
         response = self._get_response(url)
         data = response.json()
-        result = data.get("result", None)               
-        block_number = result
+        result = data.get("result", None)                       
         if not result:
             raise ValueError("Empty result for block number.")            
         try:
-            return int(block_number, 16)
+            return int(result, 16)
         except ValueError:
-            raise ValueError(f"Invalid timestamp format: {timestamp}")
+            raise ValueError(f"Invalid block number format: {result}")
             
     def get_block_timestamp(self, block_number):  
         url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"
@@ -87,20 +97,23 @@ class EtherAPI:
         transactions = result.get("transactions", []) 
         if not result:
             raise ValueError("Empty result for block transactions.")
+        if not isinstance(transactions, list):
+            raise ValueError(f"Invalid transactions format: {transactions}")
         if not transactions:
-            raise ValueError("Empty transactions for result.")    
+            raise ValueError("Empty transactions for transactions result.")    
         return transactions
 
 
-class BlocksManager:
-    def __init__(self, api, config):
+class BlockProcessor:
+    def __init__(self, api, file_manager, config):
         self.api = api
-        self.config = config      
+        self.file_manager = file_manager
+        self.config = config
 
     def process_block(self, block_number, result_queue, fetched_block_numbers, interrupt_flag=None):
         print(f'process block start flag = {interrupt_flag}')
         try:     
-            if interrupt_flag.value:
+            if interrupt_flag and interrupt_flag.value:
                 print(f"Przerwanie wykryte w bloku: {block_number}. Zakończono.")
                 return None, 0
             
@@ -121,8 +134,9 @@ class BlocksManager:
                 "transactions": transactions
             }
 
-            file_path = os.path.join(self.config.BLOCKS_DATA_DIR, f"block_{block_number}.json")       
-            self.save_block_data_to_json(block_data, file_path)
+            file_path = f"block_{block_number}.json"
+            self.file_manager.save_to_json(block_data, file_path)
+            fetched_block_numbers.append(block_number)        
 
             time.sleep(self.config.REQUEST_DELAY)            
 
@@ -131,6 +145,11 @@ class BlocksManager:
         except Exception as e:
             print(f"Exception occurred in process_block for block {block_number}: {str(e)}")
             return None
+
+
+class BlockTimestampFinder:
+    def __init__(self, api):
+        self.api = api
 
     def get_timestamp_of_first_block_on_target_date(self, target_date):    
         target_timestamp = int(datetime.strptime(target_date + " 00:00", "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp())    
@@ -181,6 +200,12 @@ class BlocksManager:
 
         return last_block_number        
 
+
+class BlockDownloader:
+    def __init__(self, api, file_manager):
+        self.api = api
+        self.file_manager = file_manager
+
     def download_single_block(self, block_number, fetched_block_numbers):
         print("Downloading single block:", block_number)
         if block_number in fetched_block_numbers:
@@ -198,24 +223,33 @@ class BlocksManager:
             "transactions": transactions
         }
 
-        file_path = os.path.join(self.config.BLOCKS_DATA_DIR, f"block_{block_number}.json")
-        self.save_block_data_to_json(block_data, file_path)
-        fetched_block_numbers.append(block_number)        
-        
-    def save_block_data_to_json(self, block_data, filename):
-        with open(filename, 'w') as json_file:
-                    json.dump(block_data, json_file, indent=4)
+        file_path = f"block_{block_number}.json"
+        self.file_manager.save_to_json(block_data, file_path)
+        fetched_block_numbers.append(block_number)
 
-        print(f"Block data saved to JSON file: {filename}")
 
-    def load_block_numbers(self, filename):
+class FileManager:
+    def __init__(self, config):
+        self.config = config
+
+    def _get_file_path(self, filename):
+         return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
+
+    def save_to_json(self, data, filename):
+        file_path = self._get_file_path(filename)
+        with open(file_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4)
+        print(f"Block data saved to JSON file: {file_path}")
+
+    def load_from_json(self, filename):
+        file_path = self._get_file_path(filename)
         try:
-            with open(filename, 'r') as file:
-                block_numbers = json.load(file)
+            with open(file_path, 'r') as file:
+                data = json.load(file)
         except FileNotFoundError:
-            block_numbers = []
+            data = []
         
-        return block_numbers
+        return data
 
 
 class MultiProcessor:
@@ -279,8 +313,11 @@ class MultiProcessor:
 class MainBlockProcessor:
     def __init__(self, config):
         self.config = config
-        self.api = EtherAPI(config)
-        self.blocks_manager = BlocksManager(self.api, self.config)               
+        self.api = EtherAPI(self.config)
+        self.file_manager = FileManager(self.config)
+        self.block_downloader = BlockDownloader(self.api, self.file_manager)
+        self.block_processor = BlockProcessor(self.api, self.file_manager, self.config)
+               
         if not os.path.exists(self.config.BLOCKS_DATA_DIR):
             os.makedirs(self.config.BLOCKS_DATA_DIR)
 
@@ -302,8 +339,8 @@ class MainBlockProcessor:
 
     def process_blocks(self, target_block_numbers, progress_callback=None, check_interrupt=None):
         processor = MultiProcessor()
-        fetched_block_numbers = self.blocks_manager.load_block_numbers(self.config.BLOCKS_DATA_FILE)
-        process_block = self.blocks_manager.process_block
+        fetched_block_numbers = self.file_manager.load_from_json(self.config.BLOCKS_DATA_FILE)
+        process_block = self.block_processor.process_block
         
         processor.start(
             target_block_numbers=target_block_numbers,
@@ -311,7 +348,7 @@ class MainBlockProcessor:
             progress_callback=progress_callback,
             check_interrupt=check_interrupt,
             fetched_block_numbers=fetched_block_numbers,
-            save_callback=lambda fetched: self.blocks_manager.save_block_data_to_json(fetched, self.config.BLOCKS_DATA_FILE)
+            save_callback=lambda fetched: self.file_manager.save_to_json(fetched, self.config.BLOCKS_DATA_FILE)
         )
 
         time.sleep(1)
@@ -321,7 +358,7 @@ class MainBlockProcessor:
         
         self.handle_missing_blocks(target_block_numbers, fetched_block_numbers)
         
-        self.blocks_manager.save_block_data_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
+        self.file_manager.save_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
         print('Fetched blocks data saved')
 
     def handle_missing_blocks(self, target_block_numbers, fetched_block_numbers):
@@ -329,8 +366,8 @@ class MainBlockProcessor:
         if missing_blocks:
             print(f"Missing blocks detected: {missing_blocks}")
             for block_number in missing_blocks:
-                self.blocks_manager.download_single_block(block_number, fetched_block_numbers)
-                time.sleep(self.config.request_delay)
+                self.block_downloader.download_single_block(block_number, fetched_block_numbers)
+                time.sleep(self.config.REQUEST_DELAY)
 
     def run(self, block_numbers_or_num_blocks, progress_callback=None, check_interrupt=None):
         target_block_numbers = self.get_target_block_numbers(block_numbers_or_num_blocks)
@@ -339,9 +376,9 @@ class MainBlockProcessor:
 
 if __name__ == "__main__":
     config = Config()
-    block_processor = MainBlockProcessor(config)       
-    BlockInput.get_num_blocks_to_fetch()   
-    block_processor.run(
+    main_block_processor = MainBlockProcessor(config)       
+    block_numbers_or_num_blocks = BlockInput.get_num_blocks_to_fetch()   
+    main_block_processor.run(
         block_numbers_or_num_blocks,
         progress_callback=lambda total, current: print(f"Postęp: {current}/{total}"),
         check_interrupt=lambda: False  
