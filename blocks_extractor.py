@@ -3,7 +3,7 @@ import json
 import heapq
 from datetime import datetime, timedelta
 import time
-from blocks_download import BlocksManager, Config, EtherAPI
+from blocks_download import Config, EtherAPI
 from json.decoder import JSONDecodeError
 
 def extract_block_data(file_path):
