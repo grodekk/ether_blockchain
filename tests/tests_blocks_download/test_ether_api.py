@@ -22,8 +22,8 @@ class TestEtherAPI:
     def test_get_response_http_success(self, mock_requests_get, api):
         mock_requests_get.return_value.status_code = 200
         response = api._get_response("http://dummy.url")
-        assert response.status_code == 200
-    
+        assert response.status_code == 200    
+
     def test_get_response_http_error(self, mock_requests_get, api):
         mock_requests_get.return_value.status_code = 404
         with pytest.raises(ConnectionError, match="HTTP error occurred: 404"):
@@ -63,7 +63,6 @@ class TestEtherAPI:
         with pytest.raises(ValueError, match="Invalid block number format: 0xxyz"):
             api.get_latest_block_number()
 
-
     # get_block_timestamp tests #    
     def test_get_block_timestamp_http_success(self, mock_requests_get, api):
         mock_requests_get.return_value.status_code = 200
@@ -93,7 +92,6 @@ class TestEtherAPI:
         mock_requests_get.return_value.json.return_value = {"result": {"timestamp": "xyz"}}
         with pytest.raises(ValueError, match="Invalid timestamp format: xyz"):
             api.get_block_timestamp("138EA39")
-
 
     # get_block_transactions tests #    
     def test_get_block_transactions_http_success(self, mock_requests_get, api):
