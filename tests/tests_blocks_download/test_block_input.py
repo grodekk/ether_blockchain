@@ -45,6 +45,7 @@ def test_get_num_blocks_to_fetch_interface_zero(mock_getInt):
     result = BlockInput.get_num_blocks_to_fetch(method='interface')
     assert result is None
 
+# get_num_block_to_fetch console and interface tests #  
 def test_get_num_blocks_to_fetch_invalid_method():
     with pytest.raises(ValueError):
         BlockInput.get_num_blocks_to_fetch(method='invalid')
