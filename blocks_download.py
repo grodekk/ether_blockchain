@@ -112,17 +112,17 @@ class BlockProcessor:
 
     def process_block(self, block_number, result_queue, fetched_block_numbers, interrupt_flag=None):
         print(f'process block start flag = {interrupt_flag}')
-        try:     
-            if interrupt_flag and interrupt_flag.value:
+
+        if interrupt_flag and interrupt_flag.value:
                 print(f"Przerwanie wykryte w bloku: {block_number}. Zakończono.")
                 return None, 0
             
-            print("Processing block:", block_number)
+        print("Processing block:", block_number)
             
-            if block_number in fetched_block_numbers:
+        if block_number in fetched_block_numbers:
                 print(f"Block {block_number} already fetched. Skipping...")
                 return None, 1        
-
+        try:
             timestamp = self.api.get_block_timestamp(hex(block_number))
             if timestamp == 0:
                 return None, 0
@@ -133,11 +133,9 @@ class BlockProcessor:
                 "timestamp": timestamp,
                 "transactions": transactions
             }
-
-            file_path = f"block_{block_number}.json"
-            self.file_manager.save_to_json(block_data, file_path)
-            fetched_block_numbers.append(block_number)        
-
+            
+            self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
+            fetched_block_numbers.append(block_number)            
             time.sleep(self.config.REQUEST_DELAY)            
 
             return block_number, 1      
@@ -145,6 +143,14 @@ class BlockProcessor:
         except Exception as e:
             print(f"Exception occurred in process_block for block {block_number}: {str(e)}")
             return None
+
+        except requests.exceptions.RequestException as e:
+            print(f"HTTP error occurred while processing block {block_number}: {str(e)}")
+        except ValueError as e:
+            print(f"Value error in block {block_number}: {str(e)}")
+        except Exception as e:
+            print(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
+        return None
 
 
 class BlockTimestampFinder:
@@ -236,20 +242,30 @@ class FileManager:
          return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
 
     def save_to_json(self, data, filename):
-        file_path = self._get_file_path(filename)
-        with open(file_path, 'w') as json_file:
-            json.dump(data, json_file, indent=4)
-        print(f"Block data saved to JSON file: {file_path}")
+       file_path = self._get_file_path(filename)
+       try:
+            with open(file_path, 'w') as json_file:
+                json.dump(data, json_file, indent=4)
+            print(f"Block data saved to JSON file: {file_path}")
+       except (IOError,OSError) as e:
+            print(f"Failed to save data to {file_path}: {e}")      
+            raise                  
 
     def load_from_json(self, filename):
         file_path = self._get_file_path(filename)
         try:
             with open(file_path, 'r') as file:
                 data = json.load(file)
+            return data
         except FileNotFoundError:
-            data = []
-        
-        return data
+            print(f"File not found: {file_path}. Returning empty data.")
+            return []
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from file {file_path}: {e}")
+            return [] 
+        except (IOError, OSError) as e:
+            print(f"Failed to load data from {file_path}: {e}")
+            return []          
 
 
 class MultiProcessor:
