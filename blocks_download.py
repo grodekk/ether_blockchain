@@ -150,7 +150,7 @@ class BlockProcessor:
             print(f"Value error in block {block_number}: {str(e)}")
         except Exception as e:
             print(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
-        return None
+        return None, 0
 
 
 class BlockTimestampFinder:
