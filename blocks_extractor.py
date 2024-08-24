@@ -60,30 +60,35 @@ class TransactionProcessor:
     def __init__(self):
         self.total_transactions = 0
         self.total_fees = 0
+
+    def _reset(self):        
+        self.total_transactions = 0
+        self.total_fees = 0.0        
+
+    def process_transaction(self, transaction):
+        sender = transaction["from"]
+        receiver = transaction["to"]
+        value_wei = int(transaction["value"], 16)
+        gas_price_wei = int(transaction["gasPrice"], 16)
+        gas_wei = int(transaction["gas"], 16)
+
+        value_eth = value_wei / 10**18
+        transaction_fee_wei = gas_price_wei * gas_wei
+        transaction_fee_eth = transaction_fee_wei / 10**18
+
+        self.total_transactions += 1
+        self.total_fees += transaction_fee_eth
+
+        return sender, receiver, value_eth
+
+class WalletUpdater:
+    def __init__(self):
         self.wallets_transactions = {}
-        self.wallets_balances = {}
-    
-    def process_transactions(self, transactions_for_hour):       
-        
-        for transaction in transactions_for_hour:        
-            
-            sender = transaction["from"]
-            receiver = transaction["to"]
-            value_wei = int(transaction["value"], 16)
-            gas_price_wei = int(transaction["gasPrice"], 16)
-            gas_wei = int(transaction["gas"], 16)
 
-            value_eth = value_wei / 10**18
-            transaction_fee_wei = gas_price_wei * gas_wei
-            transaction_fee_eth = transaction_fee_wei / 10**18
+    def _reset(self):        
+        self.wallets_transactions = {}
 
-            self.total_transactions += 1
-            self.total_fees += transaction_fee_eth
-
-            self._update_wallets(sender, receiver, value_eth)
-            print(f"Przetworzona transakcja: od {sender} do {receiver} na kwotę {value_eth} ETH.")
-    
-    def _update_wallets(self, sender, receiver, value_eth):
+    def update_wallets(self, sender, receiver, value_eth):
         if sender not in self.wallets_transactions:
             self.wallets_transactions[sender] = []
         self.wallets_transactions[sender].append({"value": -value_eth, "type": "sell"})
@@ -92,15 +97,9 @@ class TransactionProcessor:
             self.wallets_transactions[receiver] = []
         self.wallets_transactions[receiver].append({"value": value_eth, "type": "buy"})
 
-    def classify_wallets(self):
-        for wallet, transactions in self.wallets_transactions.items():
-            total_value_eth = sum(transaction["value"] for transaction in transactions)
-            classification = self.classify_wallet(total_value_eth)
-            if classification not in self.wallets_balances:
-                self.wallets_balances[classification] = 0
-            self.wallets_balances[classification] += 1
-
-    def classify_wallet(self, balance):
+class WalletClassifier:
+    @staticmethod
+    def classify_wallet(balance):
         if balance >= 10000:
             return "Above 10000 ETH"
         elif balance >= 1000:
@@ -116,10 +115,21 @@ class TransactionProcessor:
         else:
             return "Below 0.1 ETH"
 
-    def get_top_wallets(self, top_n=5, is_seller=False):
+    def classify_wallets(self, wallets_transactions):
+        wallets_balances = {}
+        for wallet, transactions in wallets_transactions.items():
+            total_value_eth = sum(transaction["value"] for transaction in transactions)
+            classification = self.classify_wallet(total_value_eth)
+            if classification not in wallets_balances:
+                wallets_balances[classification] = 0
+            wallets_balances[classification] += 1
+        return wallets_balances
+
+class TopWalletsGenerator:
+    def get_top_wallets(self, wallets_transactions, top_n=5, is_seller=False):
         key_func = (lambda x: -sum(t["value"] for t in x[1] if t["value"] < 0)) if is_seller else (lambda x: sum(t["value"] for t in x[1] if t["value"] > 0))
-        top_wallets = heapq.nlargest(top_n, self.wallets_transactions.items(), key=key_func)
-        
+        top_wallets = heapq.nlargest(top_n, wallets_transactions.items(), key=key_func)
+
         top_wallets_info = []
         for wallet_info in top_wallets:
             wallet_address, transactions = wallet_info
@@ -133,145 +143,153 @@ class TransactionProcessor:
                 "wallet balance": wallet_balance_eth
             }
             top_wallets_info.append(wallet_info_with_balance)
-        
+
         return top_wallets_info
 
-    def generate_result_data(self, start_hour_str, hourly_mode, hourly_results_all, current_hour):
-        average_fee_eth = self.total_fees / self.total_transactions if self.total_transactions > 0 else 0
+class ResultFormatter:
+    @staticmethod
+    def format_result(start_hour_str, total_transactions, total_fees, wallets_balances, top_wallets_generator, wallets_transactions):
+        average_fee_eth = total_fees / total_transactions if total_transactions > 0 else 0
+
         result_data = {
             "time": start_hour_str,
-            "transactions number": self.total_transactions,
+            "transactions number": total_transactions,
             "average transaction fee": average_fee_eth,
-            "wallet classification in eth balance": self.wallets_balances,
-            "top 5 buyers": self.get_top_wallets(top_n=5, is_seller=False),
-            "top 5 sellers": self.get_top_wallets(top_n=5, is_seller=True)
-        }       
-        print(f"Generowanie danych dla godziny: {start_hour_str}, liczba transakcji: {self.total_transactions}")
+            "wallet classification in eth balance": wallets_balances,
+            "top 5 buyers": top_wallets_generator.get_top_wallets(wallets_transactions, top_n=5, is_seller=False),
+            "top 5 sellers": top_wallets_generator.get_top_wallets(wallets_transactions, top_n=5, is_seller=True)
+        }
 
-        if hourly_mode:
-            hourly_results_all.append(result_data)
-            current_hour += timedelta(hours=1)
-            return current_hour, self.wallets_transactions, self.wallets_balances
-        else:
-            return result_data
-
-
-def extract_hourly_data(extract_date, progress_callback=None, check_interrupt=None):            
-    config = Config()
-    api = EtherAPI(config)    
-    file_manager = FileManager(config)
-    block_downloader = BlockDownloader(api, file_manager)    
-    block_file_processor = BlockFileProcessor(block_downloader, file_manager)
-    
-    transactions_grouper = TransactionsGrouper(block_file_processor)
-    transactions_by_hour = transactions_grouper.group_transactions_by_hour(progress_callback, check_interrupt=check_interrupt)   
-    
-    start_hour = datetime.strptime(extract_date, "%Y-%m-%d %H:%M:%S")
-    hourly_results_all = []  
-    current_hour = start_hour
-    hourly_mode = True
-
-    def process_and_save_transactions(transactions_for_hour, start_hour_str, end_hour_str, hourly_mode, hourly_results_all, current_hour):
-        return processor.generate_result_data(start_hour_str, hourly_mode, hourly_results_all, current_hour)
-
-    while current_hour.hour <= 23:
-        end_hour_dt = current_hour + timedelta(hours=1)
-
-        start_hour_str = current_hour.strftime("%Y-%m-%d %H:%M:%S")
-        end_hour_str = end_hour_dt.strftime("%Y-%m-%d %H:%M:%S")
-
-        transactions_for_hour = transactions_by_hour.get(start_hour_str, [])
-
-        wallets_transactions = {}        
-        wallets_balances = {
-                                "Above 10000 ETH": 0,
-                                "1000-10000 ETH": 0,
-                                "100-1000 ETH": 0,
-                                "10-100 ETH": 0,
-                                "1-10 ETH": 0,
-                                "0.1-1 ETH": 0,
-                                "0.1 ETH": 0
-                            }
-
-        total_transactions = 0
-        total_fees = 0
-        
-        print(current_hour, f"przetwarzana") 
-
-        current_hour, wallets_transactions, wallets_balances = process_and_save_transactions(transactions_by_hour, start_hour_str, end_hour_str, hourly_mode, hourly_results_all, current_hour)
-        
-        print(current_hour, f"przetworzona")   
-        if current_hour.date() != start_hour.date():
-            break
-
-    date_part = start_hour.strftime("%Y-%m-%d")
-    output_folder = "interesting_info"
-    os.makedirs(output_folder, exist_ok=True)
-    output_file_path = os.path.join(Config.CURRENT_DIRECTORY, output_folder, f"{date_part}_hourly_data.json")
-    with open(output_file_path, 'w') as output_file:
-        json.dump(hourly_results_all, output_file, indent=4)
-
-
-def extract_daily_data(extract_date, progress_callback=None, check_interrupt=None):   
-    config = Config()
-    api = EtherAPI(config)
-    file_manager = FileManager(config)
-    block_downloader = BlockDownloader(api, file_manager)    
-    block_file_processor = BlockFileProcessor(block_downloader, file_manager)
- 
-    transactions_grouper = TransactionsGrouper(block_file_processor)
-    transactions_by_hour = transactions_grouper.group_transactions_by_hour(progress_callback, check_interrupt=check_interrupt)   
-    transactions_for_day = []
-
-
-    def process_and_save_transactions(transactions_for_hour, start_hour_str, end_hour_str, hourly_mode, hourly_results_all, current_hour):
-        # Utwórz instancję TransactionProcessor
-        processor = TransactionProcessor()        
-        # Przetwórz transakcje dla bieżącej godziny
-        processor.process_transactions(transactions_for_hour)        
-        # Skategoryzuj portfele
-        processor.classify_wallets()        
-        # Generuj dane wynikowe
-        result_data = processor.generate_result_data(start_hour_str, hourly_mode, hourly_results_all, current_hour)
-        
         return result_data
 
 
-    start_hour = datetime.strptime(extract_date, "%Y-%m-%d %H:%M:%S")
-    end_hour = datetime.strptime(extract_date, "%Y-%m-%d %H:%M:%S")
-    start_hour_str = start_hour.strftime("%Y-%m-%d")
-    end_hour_str = end_hour.strftime("%Y-%m-%d")
+class HourlyDataExtractor:
+    def __init__(self, transactions_grouper, transaction_processor, wallet_updater, wallet_classifier, top_wallets_generator, result_formatter):
+        self.transactions_grouper = transactions_grouper
+        self.transaction_processor = transaction_processor
+        self.wallet_updater = wallet_updater
+        self.wallet_classifier = wallet_classifier
+        self.top_wallets_generator = top_wallets_generator
+        self.result_formatter = result_formatter
 
-    for hour, transactions_in_hour in transactions_by_hour.items():
-        hour_datetime = datetime.strptime(hour, "%Y-%m-%d %H:%M:%S")
-        if hour_datetime.date() == start_hour.date():
-            transactions_for_day.extend(transactions_in_hour)
+    def extract_data(self, extract_date, progress_callback=None, check_interrupt=None):
+        transactions_by_hour = self.transactions_grouper.group_transactions_by_hour(progress_callback, check_interrupt)
+        
+        start_hour = datetime.strptime(extract_date, "%Y-%m-%d %H:%M:%S")
+        hourly_results_all = []  
+        current_hour = start_hour
 
-    hourly_results_all = None
-    current_hour = None
+        while current_hour.hour <= 23:
+            end_hour_dt = current_hour + timedelta(hours=1)
+            start_hour_str = current_hour.strftime("%Y-%m-%d %H:%M:%S")
 
-    wallets_transactions = {}    
-    wallets_balances = {
-                            "Above 10000 ETH": 0,
-                            "1000-10000 ETH": 0,
-                            "100-1000 ETH": 0,
-                            "10-100 ETH": 0,
-                            "1-10 ETH": 0,
-                            "0.1-1 ETH": 0,
-                            "0.1 ETH": 0
-                        }
+            self.transaction_processor._reset()
+            self.wallet_updater._reset()
 
-    total_transactions = 0
-    total_fees = 0
-             
-    hourly_mode = False   
+            transactions_for_hour = transactions_by_hour.get(start_hour_str, [])
+
+            print(current_hour, f"przetwarzana") 
+            
+            for transaction in transactions_for_hour:
+                sender, receiver, value_eth = self.transaction_processor.process_transaction(transaction)
+                self.wallet_updater.update_wallets(sender, receiver, value_eth)
+            
+            wallets_balances = self.wallet_classifier.classify_wallets(self.wallet_updater.wallets_transactions)
+            
+            result_data = self.result_formatter.format_result(
+                start_hour_str,
+                self.transaction_processor.total_transactions,
+                self.transaction_processor.total_fees,
+                wallets_balances,
+                self.top_wallets_generator,
+                self.wallet_updater.wallets_transactions
+            )
+
+            hourly_results_all.append(result_data)
+            current_hour += timedelta(hours=1)
+
+            print(current_hour, f"przetworzona")   
+            if current_hour.date() != start_hour.date():
+                break
+        
+        #todo
+        date_part = start_hour.strftime("%Y-%m-%d")
+        output_folder = "interesting_info"
+        os.makedirs(output_folder, exist_ok=True)
+        output_file_path = os.path.join(Config.CURRENT_DIRECTORY, output_folder, f"{date_part}_hourly_data.json")
+        with open(output_file_path, 'w') as output_file:
+            json.dump(hourly_results_all, output_file, indent=4)
+
+class DailyDataExtractor:
+    def __init__(self, transactions_grouper, transaction_processor, wallet_updater, wallet_classifier, top_wallets_generator, result_formatter):
+        self.transactions_grouper = transactions_grouper
+        self.transaction_processor = transaction_processor
+        self.wallet_updater = wallet_updater
+        self.wallet_classifier = wallet_classifier
+        self.top_wallets_generator = top_wallets_generator
+        self.result_formatter = result_formatter
+
+    def extract_data(self, extract_date, progress_callback=None, check_interrupt=None):
+        transactions_by_hour = self.transactions_grouper.group_transactions_by_hour(progress_callback, check_interrupt)
+        transactions_for_day = []
+
+        start_hour = datetime.strptime(extract_date, "%Y-%m-%d %H:%M:%S")
+        start_hour_str = start_hour.strftime("%Y-%m-%d")
+
+        for hour, transactions_in_hour in transactions_by_hour.items():
+            hour_datetime = datetime.strptime(hour, "%Y-%m-%d %H:%M:%S")
+            if hour_datetime.date() == start_hour.date():
+                transactions_for_day.extend(transactions_in_hour)
+        
+        for transaction in transactions_for_day:
+            sender, receiver, value_eth = self.transaction_processor.process_transaction(transaction)
+            self.wallet_updater.update_wallets(sender, receiver, value_eth)
+        
+        wallets_balances = self.wallet_classifier.classify_wallets(self.wallet_updater.wallets_transactions)
+        
+        result_data = self.result_formatter.format_result(
+            start_hour_str,
+            self.transaction_processor.total_transactions,
+            self.transaction_processor.total_fees,
+            wallets_balances,
+            self.top_wallets_generator,
+            self.wallet_updater.wallets_transactions
+        )
+
+        #todo
+        date_part = start_hour.strftime("%Y-%m-%d")    
+        output_folder = "interesting_info"
+        os.makedirs(output_folder, exist_ok=True)
+        output_file_path = os.path.join(Config.CURRENT_DIRECTORY, output_folder, f"{date_part}_daily_data.json")
+        with open(output_file_path, 'w') as output_file:
+            json.dump(result_data, output_file, indent=4)
+
+
+if __name__ == "__main__":    
+    config = Config()
+    api = EtherAPI(config)
+    file_manager = FileManager(config)
+    block_downloader = BlockDownloader(api, file_manager)
+    block_file_processor = BlockFileProcessor(block_downloader, file_manager)
+    transactions_grouper = TransactionsGrouper(block_file_processor)
+    transaction_processor = TransactionProcessor()
+    wallet_updater = WalletUpdater()
+    wallet_classifier = WalletClassifier()
+    top_wallets_generator = TopWalletsGenerator()
+    result_formatter = ResultFormatter()    
     
+    print("Wybierz opcję:")
+    print("1: Ekstrakcja danych dziennych")
+    print("2: Ekstrakcja danych godzinowych")
 
-    result_data = process_and_save_transactions(transactions_for_day, start_hour_str, end_hour_str, hourly_mode, hourly_results_all, current_hour)
+    choice = input("Wybierz opcję (1/2): ")    
+    extract_date = "2024-08-08 00:00:00"
 
-    date_part = start_hour.strftime("%Y-%m-%d")    
-    output_folder = "interesting_info"
-    os.makedirs(output_folder, exist_ok=True)
-    output_file_path = os.path.join(Config.CURRENT_DIRECTORY, output_folder, f"{date_part}_daily_data.json")
-    with open(output_file_path, 'w') as output_file:
-        json.dump(result_data, output_file, indent=4)   
+    if choice == '1':
+        hourly_extractor = HourlyDataExtractor(transactions_grouper, transaction_processor, wallet_updater, wallet_classifier, top_wallets_generator, result_formatter)
+        hourly_extractor.extract_data(extract_date)
+    elif choice == '2':
+        daily_extractor = DailyDataExtractor(transactions_grouper, transaction_processor, wallet_updater, wallet_classifier, top_wallets_generator, result_formatter)
+        daily_extractor.extract_data(extract_date)
+    else:
+        print("Nieznany tryb.")
