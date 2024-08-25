@@ -111,7 +111,8 @@ class BlockProcessor:
         self.config = config
 
     def process_block(self, block_number, result_queue, fetched_block_numbers, interrupt_flag=None):
-        print(f'process block start flag = {interrupt_flag}')
+        if not isinstance(block_number, int) or block_number < 0:
+            raise ValueError("Invalid block number")        
 
         if interrupt_flag and interrupt_flag.value:
                 print(f"Przerwanie wykryte w bloku: {block_number}. Zakończono.")
@@ -123,11 +124,14 @@ class BlockProcessor:
                 print(f"Block {block_number} already fetched. Skipping...")
                 return None, 1        
         try:
-            timestamp = self.api.get_block_timestamp(hex(block_number))
-            if timestamp == 0:
-                return None, 0
+            timestamp = self.api.get_block_timestamp(hex(block_number))            
+            if not isinstance(timestamp, int) or timestamp <= 0:
+                raise ValueError("Invalid timestamp")            
 
             transactions = self.api.get_block_transactions(hex(block_number))
+            if not isinstance(transactions, list) or any(not isinstance(tx, dict) or 'hash' not in tx for tx in transactions):
+                raise ValueError("Invalid transactions")
+
             block_data = {
                 "block_number": block_number,
                 "timestamp": timestamp,
@@ -138,18 +142,14 @@ class BlockProcessor:
             fetched_block_numbers.append(block_number)            
             time.sleep(self.config.REQUEST_DELAY)            
 
-            return block_number, 1      
+            return block_number, 1   
 
-        except Exception as e:
-            print(f"Exception occurred in process_block for block {block_number}: {str(e)}")
-            return None
-
-        except requests.exceptions.RequestException as e:
-            print(f"HTTP error occurred while processing block {block_number}: {str(e)}")
         except ValueError as e:
-            print(f"Value error in block {block_number}: {str(e)}")
+            print(f"Validation error in process_block for block {block_number}: {str(e)}")
+            raise
         except Exception as e:
             print(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
+            raise
         return None, 0
 
 
