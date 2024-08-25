@@ -1,5 +1,6 @@
 import json
 import pytest
+import os
 from unittest.mock import mock_open, patch, call
 from blocks_download import FileManager, Config  
 from jsonschema import validate, ValidationError
