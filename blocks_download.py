@@ -5,48 +5,90 @@ import requests
 import json
 import os
 from PyQt5.QtWidgets import QInputDialog
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone 
+from config import Config
+import logging
+from logger import LoggerConfig
 
-
-class Config:
-    CURRENT_DIRECTORY = os.path.dirname(__file__)
-    API_KEY = "ZA1WF2Z9ZFJBGWPI8N4C6F6ARUVD3K7K5E"
-    API_URL = "https://api.etherscan.io/api"
-    REQUEST_DELAY = 0.2
-    BLOCKS_DATA_DIR = os.path.join(CURRENT_DIRECTORY, 'blocks_data')
-    BLOCKS_DATA_FILE = os.path.join(CURRENT_DIRECTORY, 'blocks_data.json')
-    JSON_FILES = [file for file in os.listdir(BLOCKS_DATA_DIR) if file.endswith(".json")]  
-
+logger = LoggerConfig(log_file='blocks_download.log', log_level=logging.DEBUG).get_logger()
 
 class BlockInput:
+    """
+    A class used to represent the process of getting the number of blocks to fetch.
+
+    Methods
+    -------
+    get_num_blocks_to_fetch(method="console", max_attempts=5):
+        Prompts the user to enter the number of blocks to fetch using the specified method.
+    """
+    
     @staticmethod
-    def get_num_blocks_to_fetch(method="console"):
+    def get_num_blocks_to_fetch(method="console", max_attempts=5):
+        """
+        Prompt the user to enter the number of blocks to fetch using the specified method.
+
+        Parameters
+        ----------
+        method : str, optional
+            The method to use for input. Can be 'console' or 'interface' (default is 'console').
+        max_attempts : int, optional
+            The maximum number of attempts allowed for invalid input (default is 5).
+
+        Returns
+        -------
+        int
+            The number of blocks to fetch if valid input is provided.
+        None
+            If the user cancels the input via the 'interface' method.
+
+        Raises
+        ------
+        ValueError
+            If the user provides invalid input, exceeds the maximum number of attempts, or chooses an invalid method.
+        """
+        logger.info(f"Attempting to get number of blocks to fetch using method: {method}")              
+        attempts = 0
+        
         if method == "console":
-            try:
-                user_input = input("Wprowadź ilość bloków do pobrania: ")
-                num_blocks = int(user_input)
-                if num_blocks <= 0:
-                    raise ValueError("Liczba bloków musi być większa niż 0.")                    
-                return num_blocks
-            except ValueError as e:
-                print(f"Zła wartość, wpisz liczbę całkowitą! ({e})")
-                return None
+            while attempts < max_attempts:
+                try:
+                    user_input = input("Enter the number of blocks to fetch: ")
+                    num_blocks = int(user_input)
+                    if num_blocks <= 0:
+                        raise ValueError("Number of blocks must be greater than 0.")         
+
+                    logger.info(f"User input for number of blocks: {num_blocks}")               
+                    return num_blocks
+
+                except ValueError as e:                
+                    logger.error(f"Invalid input, please enter an integer! ({e})")
+                    attempts += 1                   
+
+            logger.error("Maximum number of attempts reached.")
+            raise ValueError("Maximum number of attempts reached.")                                                   
                 
         elif method == "interface":
             try:
-                num_blocks, ok_pressed = QInputDialog.getInt(None, "Ilość bloków", "Wprowadź ilość bloków do pobrania:")
+                num_blocks, ok_pressed = QInputDialog.getInt(None, "Number of Blocks", "Enter the number of blocks to fetch:")
                 if ok_pressed:
                     if num_blocks <= 0:
-                        raise ValueError("Liczba bloków musi być większa niż 0.")                        
+                         raise ValueError("Number of blocks must be greater than 0.")     
+
+                    logger.info(f"User input for number of blocks via interface: {num_blocks}")
                     return num_blocks
+
                 else:
+                    logger.info("User cancelled input via interface.")
                     return None
+
             except Exception as e:
-                print(f"Problem z interfejsem: {e}")
-                return None
+                logger.error(f"Problem with interface: {e}")
+                raise
                 
         else:
-            raise ValueError("Zła metoda, użyj konsoli lub interfejsu")
+            error_message = "Invalid method, use 'console' or 'interface'."
+            logger.error(error_message)
+            raise ValueError(error_message)
 
 
 class EtherAPI:
@@ -103,54 +145,38 @@ class EtherAPI:
             raise ValueError("Empty transactions for transactions result.")    
         return transactions
 
-
-class BlockProcessor:
-    def __init__(self, api, file_manager, config):
-        self.api = api
-        self.file_manager = file_manager
+class FileManager:
+    def __init__(self, config):
         self.config = config
 
-    def process_block(self, block_number, result_queue, fetched_block_numbers, interrupt_flag=None):
-        if not isinstance(block_number, int) or block_number < 0:
-            raise ValueError("Invalid block number")        
+    def _get_file_path(self, filename):
+         return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
 
-        if interrupt_flag and interrupt_flag.value:
-                print(f"Przerwanie wykryte w bloku: {block_number}. Zakończono.")
-                return None, 0
-            
-        print("Processing block:", block_number)
-            
-        if block_number in fetched_block_numbers:
-                print(f"Block {block_number} already fetched. Skipping...")
-                return None, 1        
+    def save_to_json(self, data, filename):
+       file_path = self._get_file_path(filename)
+       try:
+            with open(file_path, 'w') as json_file:
+                json.dump(data, json_file, indent=4)
+            print(f"Block data saved to JSON file: {file_path}")
+       except (IOError,OSError) as e:
+            print(f"Failed to save data to {file_path}: {e}")      
+            raise                  
+
+    def load_from_json(self, filename):
+        file_path = self._get_file_path(filename)
         try:
-            timestamp = self.api.get_block_timestamp(hex(block_number))            
-            if not isinstance(timestamp, int) or timestamp <= 0:
-                raise ValueError("Invalid timestamp")            
-
-            transactions = self.api.get_block_transactions(hex(block_number))
-            if not isinstance(transactions, list) or any(not isinstance(tx, dict) or 'hash' not in tx for tx in transactions):
-                raise ValueError("Invalid transactions")
-
-            block_data = {
-                "block_number": block_number,
-                "timestamp": timestamp,
-                "transactions": transactions
-            }
-            
-            self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
-            fetched_block_numbers.append(block_number)            
-            time.sleep(self.config.REQUEST_DELAY)            
-
-            return block_number, 1   
-
-        except ValueError as e:
-            print(f"Validation error in process_block for block {block_number}: {str(e)}")
-            raise
-        except Exception as e:
-            print(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
-            raise
-        return None, 0
+            with open(file_path, 'r') as file:
+                data = json.load(file)
+            return data
+        except FileNotFoundError:
+            print(f"File not found: {file_path}. Returning empty data.")
+            return []
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from file {file_path}: {e}")
+            return [] 
+        except (IOError, OSError) as e:
+            print(f"Failed to load data from {file_path}: {e}")
+            return [] 
 
 
 class BlockTimestampFinder:
@@ -204,8 +230,57 @@ class BlockTimestampFinder:
 
         last_block_number = start_block_number
 
-        return last_block_number        
+        return last_block_number     
+        
 
+class BlockProcessor:
+    def __init__(self, api, file_manager, config):
+        self.api = api
+        self.file_manager = file_manager
+        self.config = config
+
+    def process_block(self, block_number, result_queue, fetched_block_numbers, interrupt_flag=None):
+        if not isinstance(block_number, int) or block_number < 0:
+            raise ValueError("Invalid block number")        
+
+        if interrupt_flag and interrupt_flag.value:
+                print(f"Przerwanie wykryte w bloku: {block_number}. Zakończono.")
+                return None, 0
+            
+        print("Processing block:", block_number)
+            
+        if block_number in fetched_block_numbers:
+                print(f"Block {block_number} already fetched. Skipping...")
+                return None, 1        
+        try:
+            timestamp = self.api.get_block_timestamp(hex(block_number))            
+            if not isinstance(timestamp, int) or timestamp <= 0:
+                raise ValueError("Invalid timestamp")            
+
+            transactions = self.api.get_block_transactions(hex(block_number))
+            if not isinstance(transactions, list) or any(not isinstance(tx, dict) or 'hash' not in tx for tx in transactions):
+                raise ValueError("Invalid transactions")
+
+            block_data = {
+                "block_number": block_number,
+                "timestamp": timestamp,
+                "transactions": transactions
+            }
+            
+            self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
+            fetched_block_numbers.append(block_number)            
+            time.sleep(self.config.REQUEST_DELAY)            
+
+            return block_number, 1   
+
+        except ValueError as e:
+            print(f"Validation error in process_block for block {block_number}: {str(e)}")
+            raise
+        except Exception as e:
+            print(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
+            raise
+        return None, 0
+    
 
 class BlockDownloader:
     def __init__(self, api, file_manager):
@@ -232,40 +307,6 @@ class BlockDownloader:
         file_path = f"block_{block_number}.json"
         self.file_manager.save_to_json(block_data, file_path)
         fetched_block_numbers.append(block_number)
-
-
-class FileManager:
-    def __init__(self, config):
-        self.config = config
-
-    def _get_file_path(self, filename):
-         return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
-
-    def save_to_json(self, data, filename):
-       file_path = self._get_file_path(filename)
-       try:
-            with open(file_path, 'w') as json_file:
-                json.dump(data, json_file, indent=4)
-            print(f"Block data saved to JSON file: {file_path}")
-       except (IOError,OSError) as e:
-            print(f"Failed to save data to {file_path}: {e}")      
-            raise                  
-
-    def load_from_json(self, filename):
-        file_path = self._get_file_path(filename)
-        try:
-            with open(file_path, 'r') as file:
-                data = json.load(file)
-            return data
-        except FileNotFoundError:
-            print(f"File not found: {file_path}. Returning empty data.")
-            return []
-        except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from file {file_path}: {e}")
-            return [] 
-        except (IOError, OSError) as e:
-            print(f"Failed to load data from {file_path}: {e}")
-            return []          
 
 
 class MultiProcessor:
