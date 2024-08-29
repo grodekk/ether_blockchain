@@ -92,58 +92,213 @@ class BlockInput:
 
 
 class EtherAPI:
+    """
+    A class for interacting with the Ethereum blockchain via etherscanAPI.
+
+    This class provides methods to retrieve information from the Ethereum blockchain,
+    including the latest block number, block timestamps, and transactions for a specific block.
+    
+    Attributes
+    ----------
+    config : object
+        An object containing configuration settings, including API URL and API key.
+    """
     def __init__(self, config):
-        self.config = config
+        self.config = config 
+
 
     def _get_response(self, url):
-        try:
-            response = requests.get(url)            
-            if response.status_code >= 400:                
+        """
+        Sends an HTTP GET request to the specified URL and handles the response.
+
+        - This private method sends a request to the given URL and processes the HTTP response. 
+        - It logs information about the request and response, and raises exceptions in case
+          of HTTP errors or request failures.
+        - It is intended for internal use within the `EtherAPI` class to facilitate 
+          communication with the API.
+
+        Parameters
+        ----------
+        url : str
+            The URL to which the HTTP GET request is sent.
+
+        Returns
+        -------
+        requests.Response
+            The response object from the HTTP GET request if the request is successful.
+
+        Raises
+        ------
+        ConnectionError
+            If the HTTP response status code indicates an error (status code >= 400), or if other request exception occurs.
+        """
+        try:            
+            response = requests.get(url)     
+            logger.info(f"Received response with status code: {response.status_code}")      
+            if response.status_code >= 400:               
+                logger.error(f"HTTP error occurred: {response.status_code} - {response.reason}")
                 raise ConnectionError(f"HTTP error occurred: {response.status_code} - {response.reason}")
-            return response
+            
+            return response            
+            
         except requests.RequestException as e:           
-            raise ConnectionError(f"Request failed: {e}")
+            logger.error(f"Request failed: {e}")
+            raise ConnectionError(f"Request failed: {e}") from e
+    
 
     def get_latest_block_number(self):
-        url = f"{self.config.API_URL}?module=proxy&action=eth_blockNumber&apikey={self.config.API_KEY}"
-        response = self._get_response(url)
-        data = response.json()
-        result = data.get("result", None)                       
-        if not result:
-            raise ValueError("Empty result for block number.")            
-        try:
-            return int(result, 16)
-        except ValueError:
-            raise ValueError(f"Invalid block number format: {result}")
-            
-    def get_block_timestamp(self, block_number):  
-        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"
-        response = self._get_response(url)
-        data = response.json()
-        result = data.get("result", {})
-        timestamp = result.get("timestamp", None)   
-        if not result:
-            raise ValueError("Empty result for block timestamp.")
-        if not timestamp:
-            raise ValueError("Empty timestamp in result.")    
-        try:
-            return int(timestamp, 16)
-        except ValueError:
-            raise ValueError(f"Invalid timestamp format: {timestamp}")
+        """
+        Fetches the latest Ethereum block number using the configured API.
 
-    def get_block_transactions(self, block_number):    
-        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"
+        Returns
+        -------
+        int
+            The latest block number as an integer.
+
+        Raises
+        ------
+        ValueError
+            If the API response cannot be parsed as JSON.
+            If the API response is empty, or if the block number format in the API response
+            is invalid and cannot be converted from hexadecimal to an integer.
+        """
+        url = f"{self.config.API_URL}?module=proxy&action=eth_blockNumber&apikey={self.config.API_KEY}" 
         response = self._get_response(url)
-        data = response.json()
-        result = data.get("result", {})
-        transactions = result.get("transactions", []) 
+
+        try:
+            data = response.json()
+            logger.debug(f"API response data: {data}")
+
+        except ValueError as e:
+            logger.error(f"Failed to parse JSON response: {e}")
+            raise ValueError("Failed to parse JSON response.") from e
+        
+        result = data.get("result", None)
+
         if not result:
+            logger.error("Empty result for block number in API response.")
+            raise ValueError("Empty result for block number.")
+
+        try:
+            block_number = int(result, 16) 
+            logger.info(f"Latest block number retrieved: {block_number}") 
+            return block_number
+
+        except ValueError as e:
+            logger.error(f"Invalid block number format: {result}")
+            raise ValueError(f"Invalid block number format: {result}") from e
+
+
+    def get_block_timestamp(self, block_number):
+        """
+        Retrieves the timestamp of a specific block from the Ethereum blockchain.
+
+        This method sends a request to the Ethereum API to retrieve the block details
+        and extracts the timestamp from the response. It converts the timestamp from
+        hexadecimal format to an integer.
+
+        Parameters
+        ----------
+        block_number : int
+            The number of the block whose timestamp is to be retrieved.
+
+        Returns
+        -------
+        int
+            The timestamp of the block as an integer.
+
+        Raises
+        ------
+        ValueError
+            If the response cannot be parsed as JSON.   
+            If the API response is empty, or if the timestamp format in the API response
+            is invalid and cannot be converted from hexadecimal to an integer.                     
+        """
+        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"      
+        logger.info(f"Requesting block timestamp for block number: {block_number}")
+        response = self._get_response(url)           
+
+        try:
+            data = response.json()
+            logger.debug(f"API response data: {data}")
+
+        except ValueError as e:
+            logger.error(f"Failed to parse JSON response: {e}")
+            raise ValueError("Failed to parse JSON response.") from e 
+
+        result = data.get("result", {})
+        timestamp = result.get("timestamp", None)
+        
+        if not result:
+            logger.error("Empty result for block timestamp in API response.")
+            raise ValueError("Empty result for block timestamp.")
+        
+        if not timestamp:
+            logger.error("Empty timestamp in result.")
+            raise ValueError("Empty timestamp in result.")
+        
+        try:
+            block_timestamp = int(timestamp, 16)
+            logger.info(f"Block timestamp retrieved: {block_timestamp}")
+            return block_timestamp
+        
+        except ValueError as e:
+            logger.error(f"Invalid timestamp format: {timestamp}")
+            raise ValueError(f"Invalid timestamp format: {timestamp}") from e            
+    
+    def get_block_transactions(self, block_number):
+        """
+        Retrieves the transactions from a specific block from the Ethereum blockchain.
+
+        This method sends a request to the Ethereum API to retrieve the list of
+        transactions from the response.
+
+        Parameters
+        ----------
+        block_number : int
+            The number of the block whose transactions are to be retrieved.
+
+        Returns
+        -------
+        list
+            A list of transactions for the specified block.
+
+        Raises
+        ------
+        ValueError
+            If the API response is empty, or if the transactions format in the API response
+            is invalid or cannot be processed as a list, or if there are no transactions in the result.
+        """
+        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"        
+        logger.info(f"Requesting block transactions for block number: {block_number}")
+        response = self._get_response(url)
+        
+        try:
+            data = response.json()
+            logger.debug(f"API response data: {data}")
+
+        except ValueError as e:
+            logger.error(f"Failed to parse JSON response: {e}")
+            raise ValueError("Failed to parse JSON response.") from e 
+
+        result = data.get("result", {})
+        transactions = result.get("transactions", [])
+        
+        if not result:
+            logger.error("Empty result for block transactions in API response.")
             raise ValueError("Empty result for block transactions.")
+        
         if not isinstance(transactions, list):
-            raise ValueError(f"Invalid transactions format: {transactions}")
+            logger.error(f"Invalid transactions format: Expected list, got {type(transactions).__name__}.")
+            raise ValueError(f"Invalid transactions format: Expected list, got {type(transactions).__name__}.")
+        
         if not transactions:
-            raise ValueError("Empty transactions for transactions result.")    
+            logger.error("Empty transactions for transactions result.")
+            raise ValueError("Empty transactions for transactions result.")
+        
+        logger.info(f"Number of transactions retrieved for block number {block_number}: {len(transactions)}")
         return transactions
+
 
 class FileManager:
     def __init__(self, config):
