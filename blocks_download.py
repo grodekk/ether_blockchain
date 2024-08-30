@@ -301,38 +301,106 @@ class EtherAPI:
 
 
 class FileManager:
+    """
+    A class to manage JSON file operations including saving and loading data.
+
+    Parameters
+    ----------
+    config : object
+        Configuration object containing settings including file paths.
+    """
     def __init__(self, config):
         self.config = config
 
     def _get_file_path(self, filename):
-         return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
+        """
+        Construct the full file path for the given filename using the config object.
+
+        Parameters
+        ----------
+        filename : str
+            The name of the file.
+
+        Returns
+        -------
+        str
+            The full path to the file.
+        """
+        return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
 
     def save_to_json(self, data, filename):
-       file_path = self._get_file_path(filename)
-       try:
+        """
+        Save the provided data to a JSON file at the location specified by the filename.
+
+        Parameters
+        ----------
+        data : object
+            The data to be saved in JSON format.
+        filename : str
+            The name of the file where data will be saved.
+
+        Raises
+        ------
+        ValueError
+            If provided data is empty.
+        OSError
+            If there is an error saving the data to the file.
+        """
+        file_path = self._get_file_path(filename)
+        if not data:
+            logger.error("Cannot save empty data to JSON file.")
+            raise ValueError("Cannot save empty data to JSON file.")
+        try:
             with open(file_path, 'w') as json_file:
                 json.dump(data, json_file, indent=4)
-            print(f"Block data saved to JSON file: {file_path}")
-       except (IOError,OSError) as e:
-            print(f"Failed to save data to {file_path}: {e}")      
-            raise                  
+            logger.info(f"Block data saved to JSON file: {file_path}")
+
+        except OSError as e:
+            logger.error(f"Failed to save data to {file_path}: {e}")
+            raise OSError("Failed to save data") from e
 
     def load_from_json(self, filename):
+        """
+        Load data from a JSON file at the location specified by the path and filename.
+
+        Parameters
+        ----------
+        filename : str
+            The name of the file to load data from.
+
+        Returns
+        -------
+        object
+            The data loaded from the JSON file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the file does not exist.
+        ValueError
+            If the JSON format is invalid.
+        OSError
+            If there is an error loading data from the file.
+        """
         file_path = self._get_file_path(filename)
+
         try:
             with open(file_path, 'r') as file:
                 data = json.load(file)
+            logger.info(f"Data loaded from JSON file: {file_path}")
             return data
-        except FileNotFoundError:
-            print(f"File not found: {file_path}. Returning empty data.")
-            return []
-        except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from file {file_path}: {e}")
-            return [] 
-        except (IOError, OSError) as e:
-            print(f"Failed to load data from {file_path}: {e}")
-            return [] 
 
+        except FileNotFoundError:
+            logger.error(f"File not found: {file_path}. Raising an exception.")
+            raise FileNotFoundError("File not found.")
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding JSON from file {file_path}: {e}")
+            raise ValueError("Invalid JSON format.") from e 
+
+        except OSError as e:
+            logger.error(f"Failed to load data from {file_path}: {e}")
+            raise OSError("Failed to load data") from e
 
 class BlockTimestampFinder:
     def __init__(self, api):
