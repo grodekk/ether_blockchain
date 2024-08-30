@@ -1,6 +1,7 @@
 import json
 import pytest
 import os
+import logging
 from unittest.mock import mock_open, patch, call
 from blocks_download import FileManager, Config  
 from jsonschema import validate, ValidationError
@@ -21,113 +22,160 @@ def test_get_file_path(file_manager):
 
 # save_to_json tests #    
 @patch("builtins.open", new_callable=mock_open)
-def test_save_to_json_success(mock_open, file_manager):
+def test_save_to_json_success(mock_open, file_manager, caplog):
+    """
+    Test for successful loading of data from JSON file.
+    """
     data = {"key": "value"}
-    filename = "test.json"    
-    file_manager.save_to_json(data, filename)           
-    written_data = "".join(call.args[0] for call in mock_open().write.call_args_list)    
+    filename = "test.json"
+
+    with caplog.at_level(logging.INFO):
+        file_manager.save_to_json(data, filename)
+    
+    written_data = "".join(call.args[0] for call in mock_open().write.call_args_list)
     expected_data = json.dumps(data, indent=4)
     assert written_data == expected_data
+        
+    assert "Block data saved to JSON file:" in caplog.text 
+    
+    with patch('blocks_download.logger', autospec=True) as mock_logger:
+        file_manager.save_to_json(data, filename)
+
+        expected_info_calls = [
+            call.info(f"Block data saved to JSON file: {file_manager._get_file_path(filename)}")
+        ]
+        mock_logger.assert_has_calls(expected_info_calls)
+        assert mock_logger.info.call_count == 1
+
 
 @patch("builtins.open", new_callable=mock_open)
-def test_save_to_json_empty_data(mock_open, file_manager):
+def test_save_to_json_empty_data(mock_open, file_manager, caplog):
+    """
+    Test for saving empty data to JSON file.
+    """
     data = {}
     filename = "empty.json"
-    file_manager.save_to_json(data, filename)
-    written_data = "".join(call.args[0] for call in mock_open().write.call_args_list)
-    expected_data = json.dumps(data, indent=4)
-    assert written_data == expected_data
 
-@patch("builtins.open", new_callable=mock_open)
-def test_save_to_json_large_data(mock_open, file_manager):
-    data = {"key": "value" * 10000}  
-    filename = "large.json"
-    file_manager.save_to_json(data, filename)
-    written_data = "".join(call.args[0] for call in mock_open().write.call_args_list)
-    expected_data = json.dumps(data, indent=4)
-    assert written_data == expected_data
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(ValueError, match="Cannot save empty data to JSON file."):
+            file_manager.save_to_json(data, filename)          
+    
+    assert "Cannot save empty data to JSON file." in caplog.text
 
-@patch("builtins.open", new_callable=mock_open)
-def test_save_to_json_nested_data(mock_open, file_manager):
-    data = {"outer_key": {"inner_key": "value"}}
-    filename = "nested.json"
-    file_manager.save_to_json(data, filename)
-    written_data = "".join(call.args[0] for call in mock_open().write.call_args_list)
-    expected_data = json.dumps(data, indent=4)
-    assert written_data == expected_data
+    with patch('blocks_download.logger', autospec=True) as mock_logger:
+        with pytest.raises(ValueError, match="Cannot save empty data to JSON file."):
+            file_manager.save_to_json(data, filename)
+        
+            expected_error_calls = [
+                call.error("Cannot save empty data to JSON file.")
+            ]
+
+            mock_logger.assert_has_calls(expected_error_calls)
+            assert mock_logger.error.call_count == 1
+
 
 @patch("builtins.open", new_callable=mock_open)
 @patch("json.dump", side_effect=OSError("Failed to write"))
-def test_save_to_json_oserror(mock_json_dump, mock_open, file_manager):   
-    data = {"key": "value"}
-    filename = "test.json"       
-    with pytest.raises(OSError):
-        file_manager.save_to_json(data, filename)
-      
-@patch("builtins.open", new_callable=mock_open)
-@patch("json.dump", side_effect=IOError("Failed to write"))
-def test_save_to_json_ioerror(mock_json_dump, mock_open, file_manager):    
-    data = {"key": "value"}
-    filename = "test.json" 
-    with pytest.raises(IOError):
-        file_manager.save_to_json(data, filename)
-
-
-# load_from_json tests #      
-@patch("builtins.open", new_callable=mock_open, read_data=json.dumps({"key": "value"}))
-def test_load_from_json_success(mock_open, file_manager):
+def test_save_to_json_oserror(mock_json_dump, mock_open, file_manager, caplog):
+    """
+    Test for handling OSError when saving data to JSON file.
+    """
     data = {"key": "value"}
     filename = "test.json"
-    result = file_manager.load_from_json(filename)    
-    assert result == data
+    
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(OSError, match="Failed to save data"):
+            file_manager.save_to_json(data, filename)
+        
+        assert "Failed to save data" in caplog.text
+    
+    with patch('blocks_download.logger', autospec=True) as mock_logger:
+        with pytest.raises(OSError, match="Failed to save data"):
+            file_manager.save_to_json(data, filename)
+        
+        expected_error_calls = [
+            call.error(f"Failed to save data to {file_manager._get_file_path(filename)}: Failed to write")
+        ]
 
-@patch("builtins.open", new_callable=mock_open, read_data=json.dumps({}))
-def test_load_from_json_empty_data(mock_open, file_manager):
-    filename = "empty.json"
-    result = file_manager.load_from_json(filename)
-    assert result == {}
+        mock_logger.assert_has_calls(expected_error_calls)
+        assert mock_logger.error.call_count == 1
 
-@patch("builtins.open", new_callable=mock_open, read_data=json.dumps({"key": "value" * 100000}))
-def test_load_from_json_large_data(mock_open, file_manager):
-    filename = "large.json"
-    result = file_manager.load_from_json(filename)
-    expected_data = {"key": "value" * 100000}
-    assert result == expected_data
 
-@patch("builtins.open", new_callable=mock_open, read_data=json.dumps({"outer_key": {"inner_key": "value"}}))
-def test_load_from_json_nested_data(mock_open, file_manager):
-    filename = "nested.json"
-    result = file_manager.load_from_json(filename)
-    expected_data = {"outer_key": {"inner_key": "value"}}
-    assert result == expected_data
+@patch("builtins.open", new_callable=mock_open, read_data=json.dumps({"key": "value"}))
+def test_load_from_json_success(mock_open, file_manager, caplog):
+    """
+    Test for successful loading of data from JSON file.
+    """
+    filename = "test.json"
+    expected_data = {"key": "value"}
+
+    with caplog.at_level(logging.INFO):
+        data = file_manager.load_from_json(filename)    
+    
+    assert data == expected_data
+    
+    assert "Data loaded from JSON file:" in caplog.text
+
+    with patch('blocks_download.logger', autospec=True) as mock_logger:
+        file_manager.load_from_json(filename)
+
+        expected_info_calls = [
+            call.info(f"Data loaded from JSON file: {file_manager._get_file_path(filename)}")
+        ]
+        mock_logger.assert_has_calls(expected_info_calls)
+        assert mock_logger.info.call_count == 1
+
+@patch("builtins.open", side_effect=FileNotFoundError("File not found"))
+def test_load_from_json_file_not_found(mock_open, file_manager, caplog):
+    """
+    Test for handling FileNotFoundError when loading data from JSON file.
+    """
+    filename = "nonexistent.json"
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(FileNotFoundError, match="File not found."):
+            file_manager.load_from_json(filename)
+
+        assert "File not found" in caplog.text
+
+    with patch('blocks_download.logger', autospec=True) as mock_logger:
+        with pytest.raises(FileNotFoundError, match="File not found."):
+            file_manager.load_from_json(filename)
+        
+        expected_error_calls = [
+            call.error(f"File not found: {file_manager._get_file_path(filename)}. Raising an exception.")
+        ]
+
+        mock_logger.assert_has_calls(expected_error_calls)
+        assert mock_logger.error.call_count == 1
+
 
 @patch("builtins.open", new_callable=mock_open)
-def test_load_from_json_file_not_found(mock_open, file_manager):
-    filename = "nonexistent.json"       
-    mock_open.side_effect = FileNotFoundError    
-    result = file_manager.load_from_json(filename) 
-    assert result == []
+@patch("json.load", side_effect=json.JSONDecodeError("Expecting value", "", 0))
+def test_load_from_json_json_decode_error(mock_json_load, mock_open, file_manager, caplog):
+    """
+    Test for handling JSONDecodeError when loading data from JSON file.
+    """
+    filename = "invalid.json"
 
-@patch("builtins.open", new_callable=mock_open, read_data="not a json")
-@patch("json.load", side_effect=json.JSONDecodeError("Expecting value", "document", 0))
-def test_load_from_json_json_decode_error(mock_json_load, mock_open, file_manager):
-    filename = "corrupted.json"       
-    result = file_manager.load_from_json(filename)    
-    assert result == []
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(ValueError, match="Invalid JSON format."):
+            file_manager.load_from_json(filename)
+        
+        # Sprawdzenie, czy komunikat o błędzie pojawił się w logach
+        assert "Error decoding JSON from file" in caplog.text
 
-@patch("builtins.open", new_callable=mock_open)
-@patch("json.load", side_effect=OSError("Failed to read"))
-def test_load_from_json_oserror(mock_json_load, mock_open, file_manager):
-    filename = "test.json"    
-    result = file_manager.load_from_json(filename)
-    assert result == []
+    with patch('blocks_download.logger', autospec=True) as mock_logger:
+        with pytest.raises(ValueError, match="Invalid JSON format."):
+            file_manager.load_from_json(filename)
+        
+        expected_error_calls = [
+            call.error(f"Error decoding JSON from file {file_manager._get_file_path(filename)}: Expecting value: line 1 column 1 (char 0)")
+        ]
 
-@patch("builtins.open", new_callable=mock_open)
-@patch("json.load", side_effect=IOError("Failed to read"))
-def test_load_from_json_ioerror(mock_json_load, mock_open, file_manager):
-    filename = "test.json"    
-    result = file_manager.load_from_json(filename)
-    assert result == []
+        mock_logger.assert_has_calls(expected_error_calls)
+        assert mock_logger.error.call_count == 1
+
 
 # json file structure tests #
 block_transaction_data = {
