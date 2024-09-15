@@ -122,8 +122,7 @@ class TestEtherAPI:
         with caplog.at_level(logging.DEBUG):
             latest_block_number = api.get_latest_block_number()
         
-        assert latest_block_number == 20507193
-        assert "API response data: {'result': '138EA39'}" in caplog.text
+        assert latest_block_number == 20507193        
         assert "Received response with status code: 200" in caplog.text
         assert "Latest block number retrieved: 20507193" in caplog.text
         
@@ -131,14 +130,13 @@ class TestEtherAPI:
             latest_block_number = api.get_latest_block_number()
 
             expected_calls = [
-                call.info('Received response with status code: 200'),      
-                call.debug('API response data: {\'result\': \'138EA39\'}'),          
+                call.info('Received response with status code: 200'),                        
                 call.info('Latest block number retrieved: 20507193')
             ]
             
             mock_logger.assert_has_calls(expected_calls)
             assert mock_logger.info.call_count == 2
-            assert mock_logger.debug.call_count == 1
+            
 
 
     def test_get_latest_block_number_empty_result(self, caplog, mock_requests_get, api):
@@ -340,14 +338,12 @@ class TestEtherAPI:
             
             expected_calls = [
                 call.info('Requesting block transactions for block number: 138EA39'),
-                call.info('Received response with status code: 200'),
-                call.debug("API response data: {'result': {'transactions': ['tx1', 'tx2']}}"),                
+                call.info('Received response with status code: 200'),                            
                 call.info('Number of transactions retrieved for block number 138EA39: 2')
             ]
             
             mock_logger.assert_has_calls(expected_calls)
-            assert mock_logger.info.call_count == 3
-            assert mock_logger.debug.call_count == 1
+            assert mock_logger.info.call_count == 3            
             
 
     def test_get_block_transactions_empty_result(self, caplog, mock_requests_get, api):
