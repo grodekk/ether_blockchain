@@ -74,7 +74,7 @@ class BlockInput:
                          raise ValueError("Number of blocks must be greater than 0.")     
 
                     logger.info(f"User input for number of blocks via interface: {num_blocks}")
-                    return num_blocks
+                    return num_blocks, True
 
                 else:
                     logger.info("User cancelled input via interface.")
@@ -692,7 +692,7 @@ class BlockProcessor:
         self.file_manager = file_manager
         self.config = config
 
-    def process_block(self, block_number, result_queue, fetched_block_numbers, interrupt_flag=None):
+    def process_block(self, block_number, fetched_block_numbers, interrupt_flag=None):
         """
         Processes a block by fetching its number, timestamp and transactions, validating the data,
         saving the block data to a file, and updating the list of fetched blocks. The function also respects
@@ -704,10 +704,7 @@ class BlockProcessor:
         Parameters
         ----------
         block_number : int
-            The number of the block to process.
-
-        result_queue : multiprocessing.Queue
-            Queue for collecting results.
+            The number of the block to process.        
 
         fetched_block_numbers : list
             List of block numbers that have already been processed.
@@ -766,8 +763,7 @@ class BlockProcessor:
                 "transactions": transactions
             }
             
-            self.file_manager.save_to_json(block_data, f"block_{block_number}.json")            
-            fetched_block_numbers.append(block_number)   
+            self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
             logger.info(f"Block {block_number} saved to block_{block_number}.json")           
             time.sleep(self.config.REQUEST_DELAY)                     
 
@@ -785,58 +781,198 @@ class BlockProcessor:
     
 
 class MultiProcessor:
+    """
+    A class for managing and processing blocks of data using multiprocessing.
+
+    This class uses a pool of worker processes to handle asynchronous block processing tasks.
+        
+    Attributes
+    ----------
+    num_processes : int
+        Number of worker processes in the pool, calculated as 75% of the total number of CPU cores.
+    pool : multiprocessing.Pool
+        A pool of worker processes for handling asynchronous tasks.
+    manager : multiprocessing.Manager
+        A manager object for sharing state between processes.    
+    interrupt_flag : multiprocessing.Value
+        A flag to indicate whether an interrupt signal has been received.
+    total_processed_blocks : multiprocessing.Value
+        A counter for tracking the total number of processed blocks.
+    progress_lock : multiprocessing.Lock
+        A lock for synchronizing access to progress updates.
+
+    Methods
+    -------
+    apply_async
+    update_progress
+    start
+    """
     def __init__(self):
         num_cores = cpu_count()
         self.num_processes = int(num_cores * 0.75)
         self.pool = Pool(processes=self.num_processes)
-        self.manager = Manager()
-        self.result_queue = self.manager.Queue()
+        self.manager = Manager()        
         self.interrupt_flag = self.manager.Value('b', False)
         self.total_processed_blocks = self.manager.Value('i', 0)
         self.progress_lock = Lock()
 
-    def apply_async(self, func, args, callback=None, error_callback=None):        
-        self.pool.apply_async(func, args=args, callback=callback, error_callback=error_callback)        
+    def apply_async(self, func, args, callback=None, error_callback=None):     
+        """
+        Apply a function asynchronously using a pool of worker processes.
+
+        This method submits a function to be executed asynchronously by the pool of worker processes.
+        It provides mechanisms to handle errors and callbacks for when the function completes.
+
+        Parameters
+        ----------
+        func : callable
+            The function to be executed asynchronously.
+        args : tuple
+            The arguments to pass to the `func` when it is called.
+        callback : callable, optional
+            A function to be called when the asynchronous execution completes successfully.            
+        error_callback : callable, optional
+            A function to be called if an error occurs during the asynchronous execution.            
+
+        Raises
+        ------
+        RuntimeError
+            If an exception is raised during the asynchronous function submission and no
+            `error_callback` is provided, a RuntimeError is raised.
+        """               
+        try:
+            self.pool.apply_async(func, args=args, callback=callback, error_callback=error_callback)
+
+        except Exception as e:            
+            if error_callback:
+                error_callback(e)    
+            else:
+                logger.error(f"Failed to apply async function: {e}")
+                raise RuntimeError("Failed to apply async function") from e
 
     def update_progress(self, x, progress_callback, total_target, fetched_block_numbers, save_callback):        
-        with self.progress_lock:           
-            block_number, progress_increment = x
-          
-            if block_number is not None:
-                self.result_queue.put(block_number)
-                fetched_block_numbers.append(block_number)
+        """       
+        Updates the progress of block processing, updates the list of fetched blocks, and triggers callbacks.
+
+        Parameters
+        ----------
+        x : tuple
+            A tuple containing:
+            - block_number (int or None): The identifier of the block that has been processed, or None if no block was processed.
+            - progress_increment (int or None): The increment value that will be added to the total progress. If None, no increment is applied.
+        progress_callback : callable
+            A function that is called to update progress indicators. It should accept two arguments:
+            - total_target (int): The total number of blocks that are to be processed.
+            - progress_value (int): The current total number of processed blocks.
+            This function is used to update progress displays or other indicators reflecting the processing progress.
+        total_target : int
+            The total number of blocks to process. This value is used by `progress_callback` to calculate the progress ratio.
+        fetched_block_numbers : list
+            A list where the numbers of processed blocks are appended. This list is updated to keep track of all blocks that have been processed.
+        save_callback : callable
+            A function that takes one argument:
+            - fetched_block_numbers (list): The list of block numbers that have been fetched and processed so far.
+            This function is called to perform periodic actions, such as saving progress data.
+
+        Raises
+        ------
+        RuntimeError
+            If an exception is raised while updating progress or invoking callbacks, a RuntimeError
+            is raised.
+        """
+        try:
+            with self.progress_lock:           
+                block_number, progress_increment = x
+            
+                if block_number is not None:                    
+                    fetched_block_numbers.append(block_number)
+                    logger.info(f"Block {block_number} added to fetched_block_numbers.")
+            
+                self.total_processed_blocks.value += progress_increment if progress_increment is not None else 0
+                progress_value = self.total_processed_blocks.value
         
-            self.total_processed_blocks.value += progress_increment if progress_increment is not None else 0
-            progress_value = self.total_processed_blocks.value
-       
-            if progress_callback:
-                progress_callback(total_target, progress_value)
-    
-            if self.total_processed_blocks.value % 50 == 0:
-                save_callback(fetched_block_numbers)
+                if progress_callback:
+                    progress_callback(total_target, progress_value)
+        
+                if self.total_processed_blocks.value % 50 == 0:
+                    logger.info(f"Saving progress with {len(fetched_block_numbers)} fetched blocks.")
+                    save_callback(fetched_block_numbers)
+
+        except Exception as e:
+            logger.error(f"Failed to update progress: {e}")
+            raise RuntimeError("Failed to update progress") from e
 
     def start(self, target_block_numbers, process_func, progress_callback, check_interrupt, fetched_block_numbers, save_callback):           
-        def error_callback(e):
-            print(f"Error occurred: {e}")
+        """
+        Starts the asynchronous processing of target block numbers using a multiprocessing pool.
 
-        def check_interrupt_wrapper():            
-            if check_interrupt:
-                self.interrupt_flag.value = check_interrupt()
-            return self.interrupt_flag.value
+        Parameters
+        ----------
+        target_block_numbers : list of int
+            A list of block numbers that need to be processed.
+        process_func : callable
+            A function responsible for processing each block. It should accept the following arguments:
+            - block_number (int): The number of the block to process.            
+            - fetched_block_numbers (list): A list to track fetched block numbers.
+            - interrupt_flag (multiprocessing.Value): A shared flag indicating whether to stop processing.
+        progress_callback : callable
+            A function that is called periodically to update the progress of the block processing. It should accept:
+            - total_target (int): The total number of blocks to process.
+            - progress_value (int): The current progress value (number of processed blocks).
+        check_interrupt : callable or None
+            A function that checks if the processing should be interrupted. It should return `True` if an interruption is requested
+        fetched_block_numbers : list of int
+            A list where the numbers of successfully processed blocks will be appended.
+        save_callback : callable
+            A function that is called to save the fetched block numbers periodically. It accepts one argument:
+            - fetched_block_numbers (list): A list of block numbers that have been processed so far.
+
+        Raises
+        ------
+        RuntimeError
+            Raised if an error occurs during the block processing or when an interrupt check fails.
+        
+        Internal Functions
+        -------------------
+        error_callback(e)
+            Handles errors that occur during asynchronous processing. Logs the error message.
+
+        check_interrupt_wrapper()
+            Checks whether the processing should be interrupted. It uses the `check_interrupt` function and updates
+            the `interrupt_flag` accordingly. If an error occurs during this check, it logs the error and raises a `RuntimeError`.
+        """
+        def error_callback(e):
+            logger.error(f"Error occurred in async process: {e}")
+
+        def check_interrupt_wrapper():
+            try:
+                if check_interrupt:
+                    self.interrupt_flag.value = check_interrupt()
+                return self.interrupt_flag.value
+                
+            except Exception as e:
+                logger.error(f"Check interrupt failed with error: {e}")
+                raise RuntimeError("Interrupt check failed") from e
 
         for block_number in target_block_numbers:
-            if check_interrupt_wrapper():
-                print("Interrupt flag is set. Stopping...")
-                break
-            print("Adding block to process:", block_number)
+            try:
+                if check_interrupt_wrapper():
+                    logger.info("Interrupt flag is set. Stopping...")
+                    break
 
-            self.apply_async(
-                process_func,
-                args=(block_number, self.result_queue, fetched_block_numbers, self.interrupt_flag),
-                callback=lambda x: self.update_progress(x, progress_callback, len(target_block_numbers), fetched_block_numbers, save_callback),
-                error_callback=error_callback
-            )
-            time.sleep(0.5)
+                logger.info(f"Adding block to process: {block_number}")
+
+                self.apply_async(
+                    process_func,
+                    args=(block_number, fetched_block_numbers, self.interrupt_flag),
+                    callback=lambda x: self.update_progress(x, progress_callback, len(target_block_numbers), fetched_block_numbers, save_callback),
+                    error_callback=error_callback
+                )
+                time.sleep(0.5)
+
+            except Exception as e:
+                logger.error(f"Failed to start processing block {block_number}: {e}")
+                raise RuntimeError("Failed to start processing block") from e
 
         self.pool.close()
         self.pool.join()
