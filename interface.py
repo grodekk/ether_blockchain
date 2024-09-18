@@ -670,11 +670,12 @@ class EthereumDataApp(QMainWindow):
 
 
     def get_blocks_count(self):
-        num_blocks, ok_pressed = blocks_download.get_num_blocks_to_fetch("interface")
+        num_blocks, ok_pressed = blocks_download.BlockInput.get_num_blocks_to_fetch(method="interface")
+        main_app = blocks_download.MainBlockProcessor(blocks_download.Config())
 
         if ok_pressed:
             print(f"Liczba bloków do pobrania: {num_blocks}")            
-            self.execute_task(blocks_download.main, num_blocks)
+            self.execute_task(main_app.run, num_blocks)
         else:
             print("Anulowano pobieranie liczby bloków")
 
