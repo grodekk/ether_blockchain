@@ -28,11 +28,10 @@ class TestBlocksProcessor:
         fetched_block_numbers = []
         
         with patch('time.sleep', return_value=None):
-            block_number, result = block_processor.process_block(20507193, [], fetched_block_numbers, None)
+            block_number, result = block_processor.process_block(20507193, fetched_block_numbers, None)
             
             assert block_number == 20507193
-            assert result == 1
-            assert fetched_block_numbers == [20507193]
+            assert result == 1            
 
             mock_file_manager.save_to_json.assert_called_once_with({
                 "block_number": 20507193,
@@ -52,7 +51,7 @@ class TestBlocksProcessor:
         block_processor, mock_api, mock_file_manager = setup_block_processor
 
         with pytest.raises(ValueError, match="Invalid block number: -1"):
-            block_processor.process_block(-1, [], [], None)
+            block_processor.process_block(-1, [], None)
 
         assert "Invalid block number: -1" in caplog.text
 
@@ -61,7 +60,7 @@ class TestBlocksProcessor:
         block_processor, mock_api, mock_file_manager = setup_block_processor
 
         with pytest.raises(ValueError, match="Invalid block number: invalid"):
-            block_processor.process_block("invalid", [], [], None)
+            block_processor.process_block("invalid", [], None)
             
         assert "Invalid block number: invalid" in caplog.text
 
@@ -71,7 +70,7 @@ class TestBlocksProcessor:
         mock_interrupt_flag = MagicMock()
         mock_interrupt_flag.value = True
         
-        block_number, result = block_processor.process_block(20507193, [], [], mock_interrupt_flag)
+        block_number, result = block_processor.process_block(20507193, [], mock_interrupt_flag)
         
         assert block_number is None
         assert result == 0
@@ -82,7 +81,7 @@ class TestBlocksProcessor:
         block_processor, mock_api, mock_file_manager = setup_block_processor
         fetched_block_numbers = [20507193]
         
-        block_number, result = block_processor.process_block(20507193, [], fetched_block_numbers, None)
+        block_number, result = block_processor.process_block(20507193, fetched_block_numbers, None)
         
         assert block_number is None
         assert result == 1
@@ -95,7 +94,7 @@ class TestBlocksProcessor:
         mock_api.get_block_timestamp.return_value = -1
 
         with pytest.raises(ValueError, match="Validation error for block 20507193"):
-            block_processor.process_block(20507193, [], [], None)
+            block_processor.process_block(20507193, [], None)
 
         
         assert "Processing block: 20507193" in caplog.text
@@ -111,7 +110,7 @@ class TestBlocksProcessor:
         ]
         
         with pytest.raises(ValueError, match="Validation error for block 20507193"):
-            block_processor.process_block(20507193, [], [], None)
+            block_processor.process_block(20507193, [], None)
 
         assert "Processing block: 20507193" in caplog.text
         assert "Invalid transactions for block: 20507193" in caplog.text
@@ -123,7 +122,7 @@ class TestBlocksProcessor:
         mock_api.get_block_timestamp.side_effect = Exception("Test exception")
         
         with pytest.raises(RuntimeError, match="Error while processing block 20507193"):
-            block_processor.process_block(20507193, [], [], None)
+            block_processor.process_block(20507193, [], None)
 
         assert "Processing block: 20507193" in caplog.text
         assert "Unexpected error occurred in process_block for block 20507193: Test exception" in caplog.text
