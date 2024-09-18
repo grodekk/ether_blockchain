@@ -202,7 +202,7 @@ class TestBlockInput:
         None
         """
         result = BlockInput.get_num_blocks_to_fetch(method='interface')
-        assert result == 10
+        assert result == (10, True)
 
         expected_calls = [
             call('Attempting to get number of blocks to fetch using method: interface'),
