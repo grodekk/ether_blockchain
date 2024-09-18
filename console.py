@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QMenuBar, QVBoxL
 import sqlite3
 import cProfile
 from datetime import datetime
+import config
 
 if __name__ == "__main__":
     current_directory = os.path.dirname(__file__)
@@ -97,5 +98,32 @@ if __name__ == "__main__":
         automator = automation.BlockAutomator(start_date, update_interval)
         automator.run()            
 
+    elif choice == "12": 
+
+        config = config.Config()
+        api = blocks_download.EtherAPI(config=config)        
+        block_timestamp_finder = blocks_download.BlockTimestampFinder(api=api)
+        
+        try:
+            target_date = "2024-08-01"
+            first_block_number = block_timestamp_finder.get_timestamp_of_first_block_on_target_date(target_date)
+            print(f"The first block on {target_date} is: {first_block_number}")
+        except Exception as e:
+            print(f"An error occurred: {e}")      
+
+    elif choice == "13": 
+
+        config = config.Config()
+        api = blocks_download.EtherAPI(config=config)        
+        block_timestamp_finder = blocks_download.BlockTimestampFinder(api=api)
+        
+        try:
+            target_date = "2024-08-01"
+            first_block_number = block_timestamp_finder.get_timestamp_of_last_block_on_target_date(target_date)
+            print(f"The first block on {target_date} is: {first_block_number}")
+        except Exception as e:
+            print(f"An error occurred: {e}")   
+
     else:
         print("Błędny wybór.")   
+        
