@@ -8,6 +8,10 @@ db_filename = os.path.join(current_directory, 'baza_danych.db')
 wallets_activity_filename = os.path.join(current_directory, 'interesting_info', 'Biggest_wallets_activity.json')
 
 def check_files():
+    if not os.path.exists(config.BLOCKS_DATA_DIR):
+        os.makedirs(config.BLOCKS_DATA_DIR)
+        print(f'Katalog "{config.BLOCKS_DATA_DIR}" został utworzony.')
+        
     if not os.path.exists(db_filename):
             conn = sqlite3.connect(db_filename)
             cursor = conn.cursor()
