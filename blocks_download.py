@@ -979,70 +979,205 @@ class MultiProcessor:
 
 
 class MainBlockProcessor:
+    """
+    A central class for orchestrating the processing of blockchain blocks download procedure. 
+    It integrates various components such as the API, file management, 
+    block downloading, and block processing, ensuring a cohesive workflow.
+
+    Parameters
+    ----------
+    config : Config
+        Configuration object containing settings for the processor.
+
+    Attributes
+    ----------
+    config : Config
+        The configuration object.
+    api : EtherAPI
+        Instance of EtherAPI for interacting with the blockchain.
+    file_manager : FileManager
+        Instance of FileManager for handling file operations.
+    block_downloader : BlockDownloader
+        Instance of BlockDownloader for downloading blocks.
+    block_processor : BlockProcessor
+        Instance of BlockProcessor for processing blocks.
+
+    Methods
+    -------
+    get_target_block_numbers
+    process_blocks
+    handle_missing_blocks
+    run
+    """    
     def __init__(self, config):
         self.config = config
         self.api = EtherAPI(self.config)
         self.file_manager = FileManager(self.config)
         self.block_downloader = BlockDownloader(self.api, self.file_manager)
         self.block_processor = BlockProcessor(self.api, self.file_manager, self.config)
-               
-        if not os.path.exists(self.config.BLOCKS_DATA_DIR):
-            os.makedirs(self.config.BLOCKS_DATA_DIR)
-
+    
     def get_target_block_numbers(self, block_numbers_or_num_blocks):
-        latest_block_number = self.api.get_latest_block_number()
+        """
+        Retrieves target block numbers based on input type.
 
-        if isinstance(block_numbers_or_num_blocks, list):
-            return block_numbers_or_num_blocks
-        elif isinstance(block_numbers_or_num_blocks, int):
-            return list(
-                range(
-                    latest_block_number - 1,
-                    latest_block_number - block_numbers_or_num_blocks - 1,
-                    -1
-                )
+        Parameters
+        ----------
+        block_numbers_or_num_blocks : Union[list, int]
+            A list of block numbers or an integer indicating the number of blocks to retrieve.
+            If an integer is provided, it represents the number of latest blocks to retrieve.
+
+        Returns
+        -------
+        list
+            A list of target block numbers.
+
+        Raises
+        ------
+        ValueError
+            If input is neither a list nor an integer.
+        RuntimeError
+            If an error occurs while fetching the target block numbers.
+        """
+        try:
+            latest_block_number = self.api.get_latest_block_number()
+            logger.debug(f"MainBlockProcessor: Fetched latest block number")
+
+            if isinstance(block_numbers_or_num_blocks, list):
+                logger.debug(f"MainBlockProcessor: Received list of block numbers")
+                return block_numbers_or_num_blocks
+
+            elif isinstance(block_numbers_or_num_blocks, int):
+                target_blocks = list(
+                    range(
+                        latest_block_number - 1,
+                        latest_block_number - block_numbers_or_num_blocks - 1,
+                        -1
+                    )
+                )                
+                logger.info(f"Generated target block numbers from {target_blocks[0]} to {target_blocks[-1]}. Total count: {len(target_blocks)}")
+                return target_blocks
+
+            else:
+                raise ValueError("Invalid input: must be either a list of block numbers or an integer number of blocks")
+
+        except ValueError as e:
+            logger.error(f"MainBlockProcessor: Failed to get target block numbers: {str(e)}")
+            raise  
+
+        except Exception as e:
+            logger.error(f"MainBlockProcessor: Failed to get target block numbers: {str(e)}")
+            raise RuntimeError(f"MainBlockProcessor: Failed to get target block numbers: {str(e)}") from e
+    
+    def process_blocks(self, target_block_numbers, progress_callback=None, check_interrupt=None):       
+        """
+        Processes blocks based on target block numbers.
+
+        Parameters
+        ----------
+        target_block_numbers : list
+            List of target block numbers to process.
+        progress_callback : callable, optional
+            A callback function to report progress (default is None).
+        check_interrupt : callable, optional
+            A function to check if processing should be interrupted (default is None).
+
+        Raises
+        ------
+        RuntimeError
+            If an error occurs during block processing.
+        """
+        try:
+            logger.debug("MainBlockProcessor: Starting block processing")
+            processor = MultiProcessor()
+            fetched_block_numbers = self.file_manager.load_from_json(self.config.BLOCKS_DATA_FILE)            
+            process_block = self.block_processor.process_block
+
+            processor.start(
+                target_block_numbers=target_block_numbers,
+                process_func=process_block,
+                progress_callback=progress_callback,
+                check_interrupt=check_interrupt,
+                fetched_block_numbers=fetched_block_numbers,
+                save_callback=lambda fetched: self.file_manager.save_to_json(fetched, self.config.BLOCKS_DATA_FILE)
             )
-        else:
-            raise ValueError("Invalid input: must be either a list of block numbers or an integer number of blocks")
 
-    def process_blocks(self, target_block_numbers, progress_callback=None, check_interrupt=None):
-        processor = MultiProcessor()
-        fetched_block_numbers = self.file_manager.load_from_json(self.config.BLOCKS_DATA_FILE)
-        process_block = self.block_processor.process_block
-        
-        processor.start(
-            target_block_numbers=target_block_numbers,
-            process_func=process_block,
-            progress_callback=progress_callback,
-            check_interrupt=check_interrupt,
-            fetched_block_numbers=fetched_block_numbers,
-            save_callback=lambda fetched: self.file_manager.save_to_json(fetched, self.config.BLOCKS_DATA_FILE)
-        )
+            time.sleep(1)
 
-        time.sleep(1)
+            if check_interrupt and check_interrupt():
+                logger.info("MainBlockProcessor: Process interrupted by check_interrupt.")
+                return
+            
+            self.handle_missing_blocks(target_block_numbers, fetched_block_numbers)
+            self.file_manager.save_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
+            logger.debug("MainBlockProcessor: process_blocks executed successfully")
 
-        if check_interrupt and check_interrupt():
-            return
-        
-        self.handle_missing_blocks(target_block_numbers, fetched_block_numbers)
-        
-        self.file_manager.save_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
-        print('Fetched blocks data saved')
+        except Exception as e:
+            logger.error(f"MainBlockProcessor: Error during block processing: {str(e)}")
+            raise RuntimeError(f"MainBlockProcessor: Error during block processing: {str(e)}") from e
 
     def handle_missing_blocks(self, target_block_numbers, fetched_block_numbers):
+        """
+        Handles the downloading of missing blocks.
+
+        Parameters
+        ----------
+        target_block_numbers : list
+            List of target block numbers to check.
+        fetched_block_numbers : list
+            List of block numbers that have already been fetched.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        RuntimeError
+            If an error occurs during the download of a block, the process raises a `RuntimeError`. 
+        """
         missing_blocks = [block_number for block_number in target_block_numbers if block_number not in fetched_block_numbers]
         if missing_blocks:
-            print(f"Missing blocks detected: {missing_blocks}")
+            logger.warning(f"Missing blocks detected: {missing_blocks}")
             for block_number in missing_blocks:
-                self.block_downloader.download_single_block(block_number, fetched_block_numbers)
-                time.sleep(self.config.REQUEST_DELAY)
+                try:
+                    self.block_downloader.download_single_block(block_number, fetched_block_numbers)
+                    time.sleep(self.config.REQUEST_DELAY)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to download block {block_number}: {str(e)}")
+                    raise RuntimeError(f"Failed to download block {block_number}") from e
+
 
     def run(self, block_numbers_or_num_blocks, progress_callback=None, check_interrupt=None):
+        """
+        Runs the main block processing sequence.
+
+        Parameters
+        ----------
+        block_numbers_or_num_blocks : Union[list, int]
+            A list of block numbers or an integer indicating the number of blocks to process.
+        progress_callback : callable, optional
+            A callback function to report progress (default is None).
+        check_interrupt : callable, optional
+            A function to check if processing should be interrupted (default is None).
+
+        Returns
+        -------
+        None
+        """
+        logger.info("Starting MainBlockProcessor run...")
         target_block_numbers = self.get_target_block_numbers(block_numbers_or_num_blocks)
         self.process_blocks(target_block_numbers, progress_callback, check_interrupt)
+        logger.info("MainBlockProcessor run completed.")
 
 
 if __name__ == "__main__":
+    """
+    Running the main block processor from the command line.
+
+    Usage:
+        Run the script directly to start the block processing procedure, mainly for testing.
+    """
     config = Config()
     main_block_processor = MainBlockProcessor(config)       
     block_numbers_or_num_blocks = BlockInput.get_num_blocks_to_fetch()   
