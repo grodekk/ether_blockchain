@@ -7,10 +7,10 @@ import os
 from PyQt5.QtWidgets import QInputDialog
 from datetime import datetime, timezone, timedelta
 from config import Config
-import logging
-from logger import LoggerConfig
+from logger import UniversalLogger, LoggerConfig
 
-logger = LoggerConfig(log_file='blocks_download.log', log_level=logging.DEBUG).get_logger()
+logger_config = LoggerConfig()
+logger = logger_config.get_logger()
 
 class BlockInput:
     """
@@ -45,7 +45,9 @@ class BlockInput:
         ValueError
             If the user provides invalid input, exceeds the maximum number of attempts, or chooses an invalid method.
         """
-        logger.info(f"Attempting to get number of blocks to fetch using method: {method}")              
+        logger.info(f"Attempting to get number of blocks to fetch using method: {method}")
+       
+        
         attempts = 0
         
         if method == "console":
@@ -285,7 +287,7 @@ class EtherAPI:
 
         result = data.get("result", {})
         transactions = result.get("transactions", [])
-        
+                
         if not result:
             logger.error("Empty result for block transactions in API response.")
             raise ValueError("Empty result for block transactions.")
@@ -765,7 +767,7 @@ class BlockProcessor:
             
             self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
             logger.info(f"Block {block_number} saved to block_{block_number}.json")           
-            time.sleep(self.config.REQUEST_DELAY)                     
+            # time.sleep(self.config.REQUEST_DELAY)                     
 
             return block_number, 1   
 
@@ -973,7 +975,7 @@ class MultiProcessor:
             except Exception as e:
                 logger.error(f"Failed to start processing block {block_number}: {e}")
                 raise RuntimeError("Failed to start processing block") from e
-
+                                                     
         self.pool.close()
         self.pool.join()
 
@@ -1113,7 +1115,7 @@ class MainBlockProcessor:
 
         except Exception as e:
             logger.error(f"MainBlockProcessor: Error during block processing: {str(e)}")
-            raise RuntimeError(f"MainBlockProcessor: Error during block processing: {str(e)}") from e
+            raise RuntimeError(f"MainBlockProcessor: Error during block processing: {str(e)}") from e        
 
     def handle_missing_blocks(self, target_block_numbers, fetched_block_numbers):
         """
@@ -1168,7 +1170,7 @@ class MainBlockProcessor:
         logger.info("Starting MainBlockProcessor run...")
         target_block_numbers = self.get_target_block_numbers(block_numbers_or_num_blocks)
         self.process_blocks(target_block_numbers, progress_callback, check_interrupt)
-        logger.info("MainBlockProcessor run completed.")
+        logger.info("MainBlockProcessor run completed.")       
 
 
 if __name__ == "__main__":
@@ -1177,7 +1179,8 @@ if __name__ == "__main__":
 
     Usage:
         Run the script directly to start the block processing procedure, mainly for testing.
-    """
+    """    
+    start_time = time.time()
     config = Config()
     main_block_processor = MainBlockProcessor(config)       
     block_numbers_or_num_blocks = BlockInput.get_num_blocks_to_fetch()   
@@ -1186,3 +1189,6 @@ if __name__ == "__main__":
         progress_callback=lambda total, current: print(f"Postęp: {current}/{total}"),
         check_interrupt=lambda: False  
     )
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(execution_time)
