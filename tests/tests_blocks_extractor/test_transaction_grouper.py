@@ -41,8 +41,8 @@ class TestTransactionsGrouper:
         }
         assert result == expected_result
         
-        assert "Starting transaction grouping. Total files to process: 2" in caplog.text
-        assert "Finished processing. Total files processed: 2/2" in caplog.text
+        assert "Total files to process: 2" in caplog.text
+        assert "Total files processed: 2/2" in caplog.text
     
 
     def test_group_transactions_by_hour_value_error(self, transactions_grouper, caplog):
