@@ -3,7 +3,10 @@ import os
 import schedule
 import json
 from datetime import datetime, timezone, timedelta
-from blocks_download import main, get_latest_block_number, get_block_timestamp, load_block_numbers, save_block_data_to_json, get_timestamp_of_first_block_on_target_date, get_timestamp_of_last_block_on_target_date
+# from blocks_download import main, get_latest_block_number, get_block_timestamp, load_block_numbers
+# , save_block_data_to_json, get_timestamp_of_first_block_on_target_date, get_timestamp_of_last_block_on_target_date
+from blocks_download import MainBlockProcessor, FileManager
+from config import Config
 import blocks_extractor
 import wallets_update
 import database_tool
@@ -15,19 +18,23 @@ db_filename = input_file_path
 BLOCKS_DATA_PATH = os.path.join(os.path.dirname(__file__), "blocks_data.json")
 PROGRESS_DATA_PATH = os.path.join(os.path.dirname(__file__), "progress.json")
 
+config = Config()
+file_manager = FileManager(config)
+main_block_processor = MainBlockProcessor(config)
+            
 
 class BlockAutomator:
-    def __init__(self, start_date, update_interval,progress_callback=None,check_interrupt=None):
+    def __init__(self, start_date, update_interval, progress_callback=None,check_interrupt=None):
         self.start_date = start_date
         self.update_interval = update_interval
-        self.fetched_block_numbers = load_block_numbers(BLOCKS_DATA_PATH)
+        self.fetched_block_numbers = file_manager.load_from_json(config.BLOCKS_DATA_FILE)
         self.progress_callback = progress_callback        
         self.check_interrupt = check_interrupt or (lambda: None)
         self.is_task_running = False     
         self.jobs = []
         print("BlockAutomator initialized with start_date:", start_date, "and update_interval:", update_interval)
         
-
+ 
     def load_progress(self):
         if os.path.exists(PROGRESS_DATA_PATH):
             with open(PROGRESS_DATA_PATH, "r") as f:
@@ -42,6 +49,23 @@ class BlockAutomator:
         with open(PROGRESS_DATA_PATH, "w") as f:
             print("Saving progress to file.")
             json.dump(progress, f, indent=4)
+
+
+
+    def fetch_blocks(self, first_block, last_block):
+        print(f"Pobieranie bloków od {first_block} do {last_block}.")
+        blocks_to_fetch = list(range(first_block, last_block + 1))
+        new_blocks = [block for block in blocks_to_fetch if block not in self.fetched_block_numbers]
+
+        if new_blocks:
+            print(f"Liczba nowych bloków: {len(new_blocks)}.")
+            main_block_processor.run(new_blocks, progress_callback=self.progress_callback, check_interrupt=self.check_interrupt)
+
+            if check_interrupt():
+                print("Pobieranie bloków przerwane przez użytkownika.")
+                return []
+
+            return new_blocks
 
 
     def fetch_blocks_since_start_date(self):
@@ -68,8 +92,10 @@ class BlockAutomator:
                 print(f"Processing blocks for date: {target_date}")
                 self.process_day(str(target_date), progress)
                 target_date = target_date + timedelta(days=1)
+
                 if not self.check_interrupt():
                     self.save_progress(progress)
+
                 print(f"Finished processing date: {target_date - timedelta(days=1)}")
 
         finally:            
@@ -77,12 +103,9 @@ class BlockAutomator:
             print("Zakończenie przetwarzania bloków.")
 
 
-    def process_day(self, target_date, progress):
-        if self.check_interrupt():
-            print("Proces dnia przerwany.")
-            return
-
+    def initialize_progress_for_date(self, target_date, progress):   
         if target_date not in progress:
+            print(f"Inicjalizowanie postępu dla daty: {target_date}")
             first_block = get_timestamp_of_first_block_on_target_date(target_date)
             last_block = get_timestamp_of_last_block_on_target_date(target_date)
             progress[target_date] = {
@@ -92,43 +115,57 @@ class BlockAutomator:
                 "reports_generated": False,
                 "balances_updated": False,
                 "data_exported": False,
-                "data_cleaned": False
+                "data_cleaned": False,
             }
             self.save_progress(progress)
+
+    def process_day(self, target_date, progress):
+        if self.check_interrupt():
+            print("Proces dnia przerwany.")
+            return
+
+        self.initialize_progress_for_date(target_date, progress)
+            
         first_block = progress[target_date]["first_block"]
         last_block = progress[target_date]["last_block"]
         blocks_fetched = progress[target_date]["blocks_fetched"]
-          
+
         if self.is_today(target_date):
             last_block = get_latest_block_number()
             progress[target_date]["last_block"] = last_block
 
-        if not blocks_fetched:
-            print('NOT BLOCK FETCHED')
-            blocks_to_fetch = list(range(first_block, last_block + 1))
-            fetched_blocks = [block for block in blocks_to_fetch if block not in self.fetched_block_numbers]
-            if fetched_blocks:                
-                print(len(fetched_blocks))
-                main(fetched_blocks,progress_callback=self.progress_callback,check_interrupt=self.check_interrupt)
-                if self.check_interrupt():
-                    print("Pobieranie bloków przerwane.")
-                    return  
-                    
-                self.fetched_block_numbers.extend(fetched_blocks)
-                save_block_data_to_json(self.fetched_block_numbers, BLOCKS_DATA_PATH)
-            if not self.is_today(target_date): 
-                print('POBRANO BLOKI')                
-                progress[target_date]["blocks_fetched"] = True
-            if not self.check_interrupt():                
-                self.save_progress(progress) 
+        if not blocks_fetched:    
+            self.fetch_and_save_new_blocks(first_block, last_block, target_date, progress)    
 
         if not self.check_interrupt():
-            if progress[target_date]["blocks_fetched"] and not self.is_today(target_date):
-                print('ZAPISYWANIE WYNIKÓW!')
-                self.process_reports(target_date, progress)
-                self.update_balances(target_date, progress)
-                self.export_data(target_date, progress)
-                self.clean_data(target_date, progress)
+            self.save_progress(progress)
+            self.finalize_day_processing(target_date, progress)
+
+
+    def fetch_and_save_new_blocks(self, first_block, last_block, target_date, progress):
+        new_blocks = self.fetch_blocks(first_block, last_block)
+        if new_blocks:
+            self.fetched_block_numbers = file_manager.load_from_json(config.BLOCKS_DATA_FILE)  
+            unique_new_blocks = self.get_unique_new_blocks(new_blocks)
+            save_block_data_to_json(unique_new_blocks, BLOCKS_DATA_PATH)
+            if not self.is_today(target_date): 
+                    print('POBRANO BLOKI')                
+                    progress[target_date]["blocks_fetched"] = True
+
+
+    def get_unique_new_blocks(self, new_blocks):
+        fetched_blocks_set = set(self.fetched_block_numbers)
+        new_blocks_set = set(new_blocks)
+        return list(new_blocks_set - fetched_blocks_set)
+
+
+    def finalize_day_processing(self, target_date, progress):        
+        if progress[target_date]["blocks_fetched"] and not self.is_today(target_date):
+            print('ZAPISYWANIE WYNIKÓW!')
+            self.process_reports(target_date, progress)
+            self.update_balances(target_date, progress)
+            self.export_data(target_date, progress)
+            self.clean_data(target_date, progress)
 
 
     def process_reports(self, target_date, progress):
