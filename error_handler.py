@@ -1,9 +1,9 @@
-from logger import LoggerConfig
+from logger import logger
 import json
 import inspect
+import sqlite3
+from functools import wraps
 
-logger_config = LoggerConfig()
-logger = logger_config.get_logger()
 
 class CustomProcessingError(Exception):
     def __init__(self, original_exception, context="", extra_info=""):
@@ -39,6 +39,52 @@ class CustomProcessingError(Exception):
             logger.error(f"{context} - JSON decoding error {file_info}: {e}")
             raise CustomProcessingError(e, context=context, extra_info="JSONDecodeError") from e
 
+        # sqlite errors #
+
+        elif isinstance(e, sqlite3.IntegrityError):
+            logger.error(f"{context} - Integrity error {file_info}: {e}")
+            raise CustomProcessingError(e, context=context, extra_info="IntegrityError") from e
+
+        elif isinstance(e, sqlite3.OperationalError):
+            logger.error(f"{context} - Operational error {file_info}: {e}")
+            raise CustomProcessingError(e, context=context, extra_info="OperationalError") from e
+
+        elif isinstance(e, sqlite3.DatabaseError):
+            logger.error(f"{context} - Database error {file_info}: {e}")
+            raise CustomProcessingError(e, context=context, extra_info="DatabaseError") from e
+
         else:
             logger.exception(f"{context} - Unexpected error {file_info}: {e}")
             raise CustomProcessingError(e, context=context, extra_info="General Exception") from e
+
+    #exception_handler_decorator_one_method#
+    @staticmethod
+    def ehd(context="", json_file=None):        
+        def decorator(func):             
+            def wrapper(self, *args, **kwargs):
+                try:
+                    return func(self, *args, **kwargs)
+
+                except CustomProcessingError as cpe:
+                    raise
+
+                except Exception as e:
+                    dynamic_json_file = kwargs.get("json_file") or (args[0] if args else json_file)
+                    dynamic_context = context or f"{self.__class__.__name__}.{func.__name__}"
+                    CustomProcessingError.handle_processing_exception(e, context=dynamic_context, json_file=dynamic_json_file)
+
+            return wrapper
+            
+        return decorator
+
+    #exception_handler_decorator_every_class_method#
+    @staticmethod
+    def ehdc(context="", json_file=None):     
+        def decorator(cls):
+            for attr_name, attr_value in cls.__dict__.items():
+                if callable(attr_value) and not attr_name.startswith("__"):
+                    # decorated by previous decorator
+                    decorated_method = CustomProcessingError.ehd(context, json_file)(attr_value)
+                    setattr(cls, attr_name, decorated_method)
+            return cls
+        return decorator
