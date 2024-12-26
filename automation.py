@@ -10,6 +10,7 @@ import wallets_update
 import database_tool
 import blocks_remover
 from logger import logger
+from error_handler import CustomProcessingError as cpe
 
 
 class TaskScheduler:
@@ -20,11 +21,12 @@ class TaskScheduler:
         self.is_running = False
 
 
-    def run(self):                   
+    @cpe.ehd()
+    def run(self):                           
         self.schedule_regular_updates()
         while True:            
             if self.check_interrupt():
-                logger.info("automation process stopped by user")
+                logger.info("Automation process stopped by user")
                 self.clear_scheduled_tasks() 
                 break 
 
@@ -33,8 +35,9 @@ class TaskScheduler:
             time.sleep(1)  
 
 
+    @cpe.ehd()
     def schedule_regular_updates(self):
-        print("Scheduling regular updates.")
+        logger.info("Scheduling regular updates.")
         self.clear_scheduled_tasks()                  
         schedule.every(self.update_interval).minutes.do(self.run_task)
 
@@ -48,11 +51,15 @@ class TaskScheduler:
         
         try:
             self.block_processor.run_sequential_processing()
+        except cpe:                  
+            raise
+        except Exception as e:            
+            cpe.handle_processing_exception(e)            
         finally:
             logger.debug("Task ended")
             self.is_running = False
-            
 
+            
     def clear_scheduled_tasks(self):
         logger.debug("Clearing scheduling tasks")
         schedule.clear()
@@ -65,10 +72,16 @@ class TaskScheduler:
             logger.debug(f"Job: {job} - Time interval: {job.interval} {job.unit} - Last time activated: {job.last_run}")
 
 
-
 class BlockProcessor:
-    def __init__(self, config, progress_manager, block_timestamp_finder, 
-                block_fetcher, data_processor, start_date, progress_callback=None, check_interrupt=None):
+    def __init__(self,
+                 config,
+                 progress_manager,
+                 block_timestamp_finder, 
+                 block_fetcher,
+                 data_processor,
+                 start_date,
+                 progress_callback=None,
+                 check_interrupt=None):
     
         self.config = config
         self.progress_manager = progress_manager
@@ -77,41 +90,41 @@ class BlockProcessor:
         self.data_processor = data_processor        
         self.start_date = start_date                
         self.progress_callback = progress_callback or (lambda *args, **kwargs: None)
-        self.check_interrupt = check_interrupt or (lambda: False)           
-        
-        print("BlockAutomator initialized with start_date:", start_date)
+        self.check_interrupt = check_interrupt or (lambda: False)              
 
-        
-    def run_sequential_processing(self):        
-                
+
+    def run_sequential_processing(self):                        
         for date in self.iterate_dates():
             target_date = str(date)
-            self.initialize_progress_for_date(target_date, self.progress_manager_progress)
+            self.initialize_progress_for_date(target_date)
 
             if target_date in self.progress_manager.progress:                
-                self.process_remaining_tasks(target_date, self.progress_manager.progress)              
-                self.process_unfetched_blocks(target_date, self.progress_manager.progress)      
+                self.process_remaining_tasks(target_date)              
+                self.process_unfetched_blocks(target_date)      
+    
+
+    def initialize_progress_for_date(self, target_date):   
+        if target_date not in self.progress_manager.progress:
+            logger.info(f"Initializing progress for date: {target_date}")
+            first_block = self.block_timestamp_finder.get_timestamp_of_first_block_on_target_date(target_date)
+            last_block = self.block_timestamp_finder.get_timestamp_of_last_block_on_target_date(target_date)
+            self.progress_manager.create_date_progress(target_date, first_block, last_block)
 
 
-    def process_unfetched_blocks(self, target_date, progress):
-        if not progress[target_date].get("blocks_fetched", False):
-            logger.info(f"[{target_date}] Pobranie bloków rozpoczęte...")
-
-            first_block, last_block = self.progress_manager.get_block_range_for_date(target_date)
-                 
-            self.block_fetcher.fetch_and_save_new_blocks(first_block, last_block, target_date, progress)      
-
-
-    def process_remaining_tasks(self, target_date, progress):
-        if progress[target_date].get("blocks_fetched", False) and not all(progress[target_date].values()):
-            logger.info(f"[{target_date}] Procesowanie pozostałych zadań...")
+    def process_remaining_tasks(self, target_date):
+        if self.progress_manager.are_blocks_fetched_and_tasks_remaining(target_date):
+            logger.info(f"[{target_date}] Processing remaining tasks...")
 
             if not self.check_interrupt():                        
-                self.finalize_day_processing(target_date, progress)
+                self.finalize_day_processing(target_date)
 
 
-    def is_today(self, target_date):
-        return target_date == datetime.utcnow().date().strftime("%Y-%m-%d")
+    def process_unfetched_blocks(self, target_date):
+        if not self.progress_manager.is_block_fetching_complete(target_date):
+            self.block_fetcher.start_block_fetching(target_date)
+
+        if not self.progress_manager.is_today(target_date):                     
+            self.progress_manager.update_task_progress(target_date, task_name="blocks_fetched")
 
 
     def iterate_dates(self):        
@@ -121,57 +134,49 @@ class BlockProcessor:
             yield target_date
             target_date += timedelta(days=1)
 
-   #todo
-    def initialize_progress_for_date(self, target_date, progress):   
-        if target_date not in progress:
-            print(f"Inicjalizowanie postępu dla daty: {target_date}")
-            first_block = self.block_timestamp_finder.get_timestamp_of_first_block_on_target_date(target_date)
-            last_block = self.block_timestamp_finder.get_timestamp_of_last_block_on_target_date(target_date)
-            self.progress_manager.create_date_progress(target_date, first_block, last_block)
 
+    def finalize_day_processing(self, target_date):        
+        if self.progress_manager.is_block_fetching_complete(target_date) and not self.progress_manager.is_today(target_date):
+            logger.info("Updating final day processing data")
+            self.data_processor.update_all_tasks(target_date)
 
-    def finalize_day_processing(self, target_date, progress):        
-        if progress[target_date]["blocks_fetched"] and not self.is_today(target_date):
-            print('ZAPISYWANIE WYNIKÓW!')
-            self.data_processor.process_reports(target_date, progress)
-            self.data_processor.update_balances(target_date, progress)
-            self.data_processor.export_data(target_date, progress)
-            self.data_processor.clean_data(target_date, progress)
 
 class BlockFetcher:
 
     def __init__(self, config, file_manager, main_block_processor, progress_manager, progress_callback=None, check_interrupt=None):               
         self.config = config
         self.file_manager = file_manager
-        self.main_block_processor = main_block_processor
-        self.progress_manager = progress_manager             
+        self.progress_manager = progress_manager
+        self.main_block_processor = main_block_processor                   
         self.fetched_block_numbers = self.file_manager.load_from_json(self.config.BLOCKS_DATA_FILE)
         self.progress_callback = progress_callback or  (lambda *args, **kwargs: None)
         self.check_interrupt = check_interrupt or (lambda: False)
 
-            
-    def fetch_and_save_new_blocks(self, first_block, last_block, target_date, progress):
-            new_blocks = self.fetch_blocks(first_block, last_block)
-            if new_blocks:
-                self.fetched_block_numbers = self.file_manager.load_from_json(self.config.BLOCKS_DATA_FILE)  
-                unique_new_blocks = self.get_unique_new_blocks(new_blocks)
-                save_block_data_to_json(unique_new_blocks, self.config.BLOCKS_DATA_FILE)
-                if not self.is_today(target_date):                     
-                    self.progress_manager.update_task_progress(target_date, task_name="blocks_fetched")
+
+    def start_block_fetching(self, target_date):            
+        first_block, last_block = self.progress_manager.get_block_range_for_date(target_date)        
+        new_blocks = self.fetch_blocks(first_block, last_block)
+        self.save_new_blocks(new_blocks)
+        
+
+    def save_new_blocks(self, new_blocks):
+        if new_blocks:
+            self.fetched_block_numbers = self.file_manager.load_from_json(self.config.BLOCKS_DATA_FILE)  
+            unique_new_blocks = self.get_unique_new_blocks(new_blocks)
+            self.file_manager.save_block_data_to_json(unique_new_blocks, self.config.BLOCKS_DATA_FILE)
 
 
     def fetch_blocks(self, first_block, last_block):
-            print(f"Pobieranie bloków od {first_block} do {last_block}.")
+            logger.info(f"Fetching blocks in range: {first_block} - {last_block}.")
             blocks_to_fetch = list(range(first_block, last_block + 1))
             new_blocks = [block for block in blocks_to_fetch if block not in self.fetched_block_numbers]
 
             if new_blocks:
-                print(f"Liczba nowych bloków: {len(new_blocks)}.")                
-                print(self.progress_callback, self.check_interrupt)
+                logger.info(f"Number of new blocks: {len(new_blocks)}.")
                 self.main_block_processor.run(new_blocks, progress_callback=self.progress_callback, check_interrupt=self.check_interrupt)
 
                 if check_interrupt():
-                    print("Pobieranie bloków przerwane przez użytkownika.")
+                    logger.info("Block fetching stopped by user")
                     return []
 
                 return new_blocks
@@ -182,22 +187,31 @@ class BlockFetcher:
         new_blocks_set = set(new_blocks)
         return list(new_blocks_set - fetched_blocks_set)
 
+    
 
 class ProgressManager:
-    def __init__(self, config, check_interrupt=None):
+    def __init__(self, config, ether_api, check_interrupt=None):
         self.config = config
-        self.progress = progress_manager.load_progress()
+        self.progress = self.load_progress()
+        self.ether_api = ether_api
         self.check_interrupt = check_interrupt or (lambda: False)  
 
     def update_task_progress(self, target_date, task_name):
         self.progress[target_date][task_name] = True
-        self.progress_manager.save_progress(self.progress)
-
+        self.save_progress()
         
-    def is_task_complete(self, target_date, task_name):
-        """Sprawdza, czy zadanie dla danej daty zostało ukończone."""
+    def is_task_complete(self, target_date, task_name):        
         return self.progress.get(target_date, {}).get(task_name, False)       
+    
+    def are_blocks_fetched_and_tasks_remaining(self, target_date):        
+        return self.is_block_fetching_complete(target_date) and not self.are_all_tasks_complete(target_date)
         
+    def is_block_fetching_complete(self, target_date):        
+        return self.progress.get(target_date, {}).get("blocks_fetched", False)
+
+    def are_all_tasks_complete(self, target_date):        
+        return all(self.progress[target_date].values())
+
     
     def create_date_progress(self, target_date, first_block, last_block):    
         self.progress[target_date] = {
@@ -209,7 +223,8 @@ class ProgressManager:
             "data_exported": False,
             "data_cleaned": False,
         }
-        self.save_progress(self.progress)
+        self.save_progress()
+
 
     def load_progress(self):
         if os.path.exists(self.config.PROGRESS_DATA_FILE):
@@ -228,58 +243,66 @@ class ProgressManager:
                 json.dump(self.progress, f, indent=4)
 
 
-    def get_block_range_for_date(self, target_date):        
+    def get_block_range_for_date(self, target_date):
         
         first_block = self.progress[target_date]["first_block"]
         last_block = self.progress[target_date]["last_block"]        
 
         if self.is_today(target_date):
-            last_block = get_latest_block_number()
+            last_block = self.ether_api.get_latest_block_number()
             self.progress[target_date]["last_block"] = last_block
         
         return first_block, last_block
 
 
+    def is_today(self, target_date):
+        return target_date == datetime.utcnow().date().strftime("%Y-%m-%d")
+
+
 class DataProcessor:
 
+    def __init__(self, config, progress_manager):
+        self.config = config
+        self.progress_manager = progress_manager
+        
 
-    def process_reports(self, target_date, progress):
-        if not self.progress[target_date]["reports_generated"]:
-            self.generate_hourly_report(target_date)
-            self.generate_daily_report(target_date)
-            self.progress[target_date]["reports_generated"] = True
-            self.save_progress(self.progress)
-
-
-    def update_balances(self, target_date, progress):
-        if not self.progress[target_date]["balances_updated"]:
-            self.update_wallet_balances(target_date)
-            self.progress[target_date]["balances_updated"] = True
-            self.save_progress(self.progress)
+    def process_task(self, target_date, task_name, task_function):
+        if not self.progress_manager.is_task_complete(target_date, task_name):
+            task_function(target_date)
+            self.progress_manager.update_task_progress(target_date, task_name)
 
 
-    def export_data(self, target_date, progress):
-        if not self.progress[target_date]["data_exported"]:
-            self.export_to_database(target_date)
-            self.progress[target_date]["data_exported"] = True
-            self.save_progress(self.progress)
+    def update_all_tasks(self, target_date):
+
+        data_tasks = [
+            {"name": "reports_generated", "function": self.generate_reports},
+            {"name": "balances_updated", "function": self.update_wallet_balances},     
+            {"name": "data_exported", "function": self.export_to_database},
+            {"name": "data_cleaned", "function": self.clean_blocks_data},  
+        ]
+
+        for task in data_tasks:
+            self.process_task(target_date, task["name"], task["function"])
 
 
-    def clean_data(self, target_date, progress):
-        if not self.progress[target_date]["data_cleaned"]:
-            self.clean_blocks_data(target_date, self.progress)
-            self.progress[target_date]["data_cleaned"] = True
-            self.save_progress(self.progress)
+    def generate_reports(self, target_date):
+        self.generate_daily_report(target_date)
+        self.generate_hourly_report(target_date)
 
     
     def generate_hourly_report(self, target_date):
-        date_time_str = f"{target_date} 00:00:00"
-        blocks_extractor.extract_hourly_data(date_time_str)
+        extract_date = f"{target_date} 00:00:00"
+        hourly_extractor = blocks_extractor.ExtractorFactory.create_extractor('hourly', extract_date)
+        hourly_extractor.extract_data(extract_date)
+
 
 
     def generate_daily_report(self, target_date):
-        date_time_str = f"{target_date} 00:00:00"
-        blocks_extractor.extract_daily_data(date_time_str)
+        extract_date = f"{target_date} 00:00:00"
+        daily_extractor = blocks_extractor.ExtractorFactory.create_extractor('daily', extract_date)
+        daily_extractor.extract_data(extract_date)
+
+    
         
 
     def update_wallet_balances(self, target_date):        
@@ -287,7 +310,8 @@ class DataProcessor:
         wallets_update.save_top_wallets_info(input_file_name)
 
 
-    def export_to_database(self, target_date):                
+    def export_to_database(self, target_date):        
+        db_filename = self.config.DB_FILENAME         
         input_file_name = f"{target_date}_daily_data.json"
         data_type = "daily"
         database_tool.import_data_to_combined_table(input_file_name, db_filename, data_type)
@@ -298,7 +322,7 @@ class DataProcessor:
         database_tool.save_biggest_wallets_activity_database(input_file_name, db_filename)   
 
 
-    def clean_blocks_data(self, target_date, progress):
+    def clean_blocks_data(self, target_date):
         first_block = self.progress[target_date]["first_block"]
         last_block = self.progress[target_date]["last_block"]
         blocks_remover.remove_blocks_in_range(first_block, last_block)
@@ -311,31 +335,26 @@ class AutomationFactory:
         ether_api = EtherAPI(config)
         file_manager = FileManager(config)
         main_block_processor = MainBlockProcessor(config)      
-
-        progress_manager = ProgressManager(config) 
-        # shared_progress = progress_manager.load_progress()
+        progress_manager = ProgressManager(config, ether_api)         
         
         block_fetcher = BlockFetcher(
-            config=config,
+            config=config,            
             file_manager=file_manager,
-            main_block_processor=main_block_processor,
+            main_block_processor=main_block_processor,         
             progress_manager=progress_manager,
             progress_callback=progress_callback,
             check_interrupt=check_interrupt,
         )
-                
-        
+                        
         block_timestamp_finder = BlockTimestampFinder(ether_api)
-        data_processor = DataProcessor(shared_progress)
+        data_processor = DataProcessor(config, progress_manager)
         
-        block_processor = BlockProcessor(
-            shared_progress=shared_progress
+        block_processor = BlockProcessor(            
             config=config,
             progress_manager=progress_manager,
             block_timestamp_finder=block_timestamp_finder,
             block_fetcher=block_fetcher,
-            data_processor=data_processor,
-            progress = shared_progress
+            data_processor=data_processor,            
             start_date=start_date,
             progress_callback=progress_callback,
             check_interrupt=check_interrupt,
@@ -354,7 +373,7 @@ if __name__ == "__main__":
     config = Config()
     automator = AutomationFactory.create_automator(
         config=config,
-        start_date="2023-12-30",
+        start_date="2024-12-24",
         progress_callback=lambda total, current: print(f"progress: {current}/{total}"),
         check_interrupt=False,
     )
