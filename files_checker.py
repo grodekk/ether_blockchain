@@ -1,22 +1,41 @@
 import os
 import sqlite3
 import json
+from config import Config 
+from database_tool import DatabaseManager
+from logger import logger
+from error_handler import CustomProcessingError as cpe
 
-current_directory = os.path.dirname(__file__)
+@cpe.ehdc()
+class FilesChecker:
+    def __init__(self, config, database_manager):
+        self.config = config
+        self.database_manager = database_manager
+    
+    
+    def ensure_directory(self, path):
+        if not os.path.exists(path):
+            os.makedirs(path)
+            logger.info(f'Directory "{path}" was successfully created.')
 
-db_filename = os.path.join(current_directory, 'baza_danych.db')
-wallets_activity_filename = os.path.join(current_directory, 'interesting_info', 'Biggest_wallets_activity.json')
+    
+    def ensure_file(self, path, initializer=None):
+        if not os.path.exists(path):
+            with open(path, 'w') as f:
+                if initializer:
+                    initializer()
+            logger.info(f'File "{path}" was successfully created.')
 
-def check_files():
-    if not os.path.exists(config.BLOCKS_DATA_DIR):
-        os.makedirs(config.BLOCKS_DATA_DIR)
-        print(f'Katalog "{config.BLOCKS_DATA_DIR}" został utworzony.')
-        
-    if not os.path.exists(db_filename):
-            conn = sqlite3.connect(db_filename)
-            cursor = conn.cursor()
+    
+    def initialize_wallets_activity(self):
+        with open(self.config.WALLETS_ACTIVITY_FILENAME, 'w') as json_file:
+            json.dump({}, json_file)
+        logger.info(f'File "{self.config.WALLETS_ACTIVITY_FILENAME}" initialized with an empty dictionary.')
 
-            cursor.execute('''
+    
+    def initialize_database(self):
+        with self.database_manager as db:
+            db.execute_query('''
                 CREATE TABLE IF NOT EXISTS combined_data (
                     id INTEGER PRIMARY KEY,
                     data_type TEXT,
@@ -33,9 +52,7 @@ def check_files():
                     wallet_1000_10000_eth INTEGER
                 )
             ''')
-
-        
-            cursor.execute('''
+            db.execute_query('''
                 CREATE TABLE IF NOT EXISTS wallet_balance (
                     id INTEGER PRIMARY KEY,
                     wallet_address TEXT,
@@ -49,15 +66,26 @@ def check_files():
                     UNIQUE(wallet_address, date)
                 )
             ''')
+        logger.info(f'Database "{self.config.DB_FILENAME}" initialized.')
+
+    
+    def check_files(self):
+        logger.info("Checking files and directories...")
         
-            conn.commit()
-            conn.close()
-            print(f'Baza danych "{db_filename}" i tabela zostały utworzone.')
+        self.ensure_directory(self.config.BLOCKS_DATA_DIR)
+        self.ensure_directory(self.config.OUTPUT_FOLDER)
+        self.ensure_directory(self.config.LOG_DIR)
+        
+        self.ensure_file(self.config.WALLETS_ACTIVITY_FILENAME, initializer=self.initialize_wallets_activity)
+        self.ensure_file(self.config.LOG_FILE)
+        self.ensure_file(self.config.DB_FILENAME, initializer=self.initialize_database)
 
-    if not os.path.exists(wallets_activity_filename):
-            with open(wallets_activity_filename, 'w') as json_file:
-                empty_data = {}
-                json.dump(empty_data, json_file)
-            print(f'Plik "{wallets_activity_filename}" został utworzony z pustym słownikiem.')
+        logger.info("All files and directories are checked!")
 
-    return True
+    
+if __name__ == "__main__":
+    input_file_name = "2024-10-02_daily_data.json"
+    config = Config()
+    database_manager = DatabaseManager(config.DB_FILENAME)
+    files_checker = FilesChecker(config, database_manager)
+    files_checker.check_files()
