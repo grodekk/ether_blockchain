@@ -1,8 +1,11 @@
 import pytest
-from unittest.mock import patch, call
+from unittest.mock import patch, call, MagicMock
 from blocks_download import EtherAPI
 import requests
 import logging
+
+from error_handler import CustomProcessingError
+
 
 class DummyConfig:
     API_URL = "http://dummy.url"
@@ -20,99 +23,87 @@ def mock_requests_get():
 
 
 class TestEtherAPI:
-    # _get_response tests #   
-    def test_get_response_success(self, caplog, mock_requests_get, api):        
+
+    # _get_response tests #
+    def test_get_response_success(self, caplog, mock_requests_get, api):
         mock_requests_get.return_value.status_code = 200
         mock_requests_get.return_value.reason = "OK"
         mock_requests_get.return_value.text = "Success"
-        
+
         with caplog.at_level(logging.INFO):
             response = api._get_response("http://dummy.url")
-        
-        assert "Received response with status code: 200" in caplog.text
-        
-        with patch('blocks_download.logger', autospec=True) as mock_logger:
-            response = api._get_response("http://dummy.url")
 
-            expected_info_calls = [
-                call('Received response with status code: 200')
-            ]        
+        assert response.status_code == 200
+        assert response.reason == "OK"
+        assert response.text == "Success"
+        assert "Request succeeded with status code: 200" in caplog.text
 
-            mock_logger.info.assert_has_calls(expected_info_calls)
-            assert mock_logger.info.call_count == 1
-                    
-            assert response.status_code == 200
-            assert response.reason == "OK"
-            assert response.text == "Success"
-    
 
     def test_get_response_http_error(self, caplog, mock_requests_get, api):
-            mock_requests_get.return_value.status_code = 404
-            mock_requests_get.return_value.reason = "Not Found"            
-            
-            with caplog.at_level(logging.INFO):
-                with pytest.raises(ConnectionError, match="HTTP error occurred: 404 - Not Found"):
-                    api._get_response("http://dummy.url")
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.reason = "NOT FOUND"
+        mock_response.request.url = "https://httpbin.org/status/404"
+        mock_requests_get.return_value.raise_for_status.side_effect = requests.HTTPError("404 Not Found",
+                                                                                        response=mock_response)
 
-            assert "Received response with status code: 404" in caplog.text    
-            assert "HTTP error occurred: 404 - Not Found" in caplog.text
-            
-            with patch('blocks_download.logger', autospec=True) as mock_logger:
-                with pytest.raises(ConnectionError, match="HTTP error occurred: 404 - Not Found"):
-                    api._get_response("http://dummy.url")
-                
-                expected_calls = [
-                    call.info('Received response with status code: 404'),
-                    call.error('HTTP error occurred: 404 - Not Found')
-                ]                
-                
-                mock_logger.assert_has_calls(expected_calls)
-                assert mock_logger.error.call_count == 1
-                assert mock_logger.info.call_count == 1               
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(CustomProcessingError, match="404 Not Found"):
+                api._get_response("http://dummy.url")
+
+        assert 'HTTP error' in caplog.text
+        assert 'status code 404' in caplog.text
+        assert 'reason NOT FOUND' in caplog.text
+        assert 'URL https://httpbin.org/status/404' in caplog.text
+
+
+    def test_get_response_connection_error(self, caplog, mock_requests_get, api):
+        mock_requests_get.side_effect = requests.ConnectionError("Failed to establish a new connection")
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(CustomProcessingError, match="Failed to establish a new connection"):
+                api._get_response("http://dummy.url")
+
+        assert 'Connection error' in caplog.text
+        assert 'Failed to establish a new connection' in caplog.text
+        assert 'EtherAPI._get_response' in caplog.text
 
 
     def test_get_response_timeout(self, caplog, mock_requests_get, api):
-        mock_requests_get.side_effect = requests.Timeout("The request timed out")
-        
-        with caplog.at_level(logging.ERROR):
-            with pytest.raises(ConnectionError, match="Request failed: The request timed out"):
-                api._get_response("http://dummy.url")
-        
-        assert "Request failed: The request timed out" in caplog.text
-        
-        with patch('blocks_download.logger', autospec=True) as mock_logger:
-            with pytest.raises(ConnectionError, match="Request failed: The request timed out"):
-                api._get_response("http://dummy.url")
-            
-            expected_error_calls = [
-                call('Request failed: The request timed out')
-            ]
-            
-            mock_logger.error.assert_has_calls(expected_error_calls)
-            assert mock_logger.error.call_count == 1
-            mock_logger.info.assert_not_called()              
+        mock_requests_get.return_value.raise_for_status.side_effect = requests.Timeout("The request timed out")
 
-    
-    def test_get_response_request_exception(self, caplog, mock_requests_get, api):
-        mock_requests_get.side_effect = requests.RequestException("General error")
-        
         with caplog.at_level(logging.ERROR):
-            with pytest.raises(ConnectionError, match="Request failed: General error"):
+            with pytest.raises(CustomProcessingError, match="The request timed out"):
                 api._get_response("http://dummy.url")
-        
-        assert "Request failed: General error" in caplog.text
-        
-        with patch('blocks_download.logger', autospec=True) as mock_logger:
-            with pytest.raises(ConnectionError, match="Request failed: General error"):
+
+        assert 'Timeout error' in caplog.text
+        assert 'The request timed out' in caplog.text
+        assert 'EtherAPI._get_response' in caplog.text
+
+
+    def test_get_response_too_many_redirects(self, caplog, mock_requests_get, api):
+        mock_requests_get.return_value.raise_for_status.side_effect = requests.TooManyRedirects("redirectsError")
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(CustomProcessingError, match="redirectsError"):
                 api._get_response("http://dummy.url")
-            
-            expected_error_calls = [
-                call('Request failed: General error')
-            ]
-            
-            mock_logger.error.assert_has_calls(expected_error_calls)
-            assert mock_logger.error.call_count == 1
-            mock_logger.info.assert_not_called()
+
+        assert 'redirectsError' in caplog.text
+        assert 'Too many redirects error' in caplog.text
+        assert 'EtherAPI._get_response' in caplog.text
+
+
+    def test_get_response_request_exception(self, caplog, mock_requests_get, api):
+        mock_requests_get.return_value.raise_for_status.side_effect = requests.RequestException("An error occurred")
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(CustomProcessingError, match="An error occurred"):
+                api._get_response("http://dummy.url")
+
+        assert 'General request exception' in caplog.text
+        assert 'An error occurred' in caplog.text
+        assert 'EtherAPI._get_response' in caplog.text
+
 
     # get_latest_block_number tests #    
     def test_get_latest_block_number_success(self, caplog, mock_requests_get, api):        
