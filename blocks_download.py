@@ -1,5 +1,4 @@
 from multiprocessing import cpu_count, Manager, Pool, Lock
-from queue import Empty
 import time
 import requests 
 import json
@@ -7,201 +6,204 @@ import os
 from PyQt5.QtWidgets import QInputDialog
 from datetime import datetime, timezone, timedelta
 from config import Config
-from logger import UniversalLogger, LoggerConfig
+from logger import logger
+from error_handler import ErrorHandler, CustomProcessingError
+from typing import Any, TextIO
 
-logger_config = LoggerConfig()
-logger = logger_config.get_logger()
 
 class BlockInput:
     """
-    A class used to represent the process of getting the number of blocks to fetch.
+    Handles user input for the number of blocks to fetch, using either
+    console-based input, graphical interface or other.
 
-    Methods
-    -------
-    get_num_blocks_to_fetch
+    Parameters
+    ----------
+    method : str, optional
+        The input method to use (default is "console").
     """
-    
-    @staticmethod
-    def get_num_blocks_to_fetch(method="console", max_attempts=5):
+    def __init__(self, method: str="console") -> None:
+        self.method = method
+
+
+    @ErrorHandler.ehd()
+    def get_num_blocks_to_fetch(self, max_attempts: int=5) -> int:
         """
-        Prompt the user to enter the number of blocks to fetch using the specified method.
+        Retrieves the number of blocks to fetch using the specified input method.
 
         Parameters
         ----------
-        method : str, optional
-            The method to use for input. Can be 'console' or 'interface' (default is 'console').
         max_attempts : int, optional
-            The maximum number of attempts allowed for invalid input (default is 5).
+            The maximum number of attempts for console input validation
+            (default is 5). Only applicable to console input.
 
         Returns
         -------
         int
-            The number of blocks to fetch if valid input is provided.
-        None
-            If the user cancels the input via the 'interface' method.
+            The number of blocks to fetch.
 
         Raises
         ------
         ValueError
-            If the user provides invalid input, exceeds the maximum number of attempts, or chooses an invalid method.
+            If an invalid method is specified.
         """
-        logger.info(f"Attempting to get number of blocks to fetch using method: {method}")
-       
-        
-        attempts = 0
-        
-        if method == "console":
-            while attempts < max_attempts:
-                try:
-                    user_input = input("Enter the number of blocks to fetch: ")
-                    num_blocks = int(user_input)
-                    if num_blocks <= 0:
-                        raise ValueError("Number of blocks must be greater than 0.")         
+        logger.debug(f"Attempting to get number of blocks to fetch using method: {self.method}")
 
-                    logger.info(f"User input for number of blocks: {num_blocks}")               
-                    return num_blocks
+        if self.method == "console":
+            return self.console_input(max_attempts=max_attempts)
 
-                except ValueError as e:                
-                    logger.error(f"Invalid input, please enter an integer! ({e})")
-                    attempts += 1                   
+        elif self.method == "interface":
+            return self.interface_input()
 
-            logger.error("Maximum number of attempts reached.")
-            raise ValueError("Maximum number of attempts reached.")                                                   
-                
-        elif method == "interface":
-            try:
-                num_blocks, ok_pressed = QInputDialog.getInt(None, "Number of Blocks", "Enter the number of blocks to fetch:")
-                if ok_pressed:
-                    if num_blocks <= 0:
-                         raise ValueError("Number of blocks must be greater than 0.")     
-
-                    logger.info(f"User input for number of blocks via interface: {num_blocks}")
-                    return num_blocks, True
-
-                else:
-                    logger.info("User cancelled input via interface.")
-                    return None
-
-            except Exception as e:
-                logger.error(f"Problem with interface: {e}")
-                raise
-                
         else:
-            error_message = "Invalid method, use 'console' or 'interface'."
-            logger.error(error_message)
-            raise ValueError(error_message)
+            raise ValueError("Invalid method, use 'console' or 'interface'.")
 
 
+    @ErrorHandler.ehd(custom_message="Maximum number of attempts reached.")
+    def console_input(self, max_attempts: int) -> int:
+        """
+        Retrieves the number of blocks to fetch via the console, allowing multiple attempts.
+
+        Returns
+        -------
+        int
+            The number of blocks to fetch.
+
+        Raises
+        ------
+        ValueError
+            If the maximum number of attempts is reached.
+        """
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                num_blocks = self.get_user_input()
+                return self.validate_input(num_blocks)
+
+            except CustomProcessingError:
+                attempts += 1
+
+        raise ValueError("Maximum number of attempts reached.")
+
+
+    @ErrorHandler.ehd()
+    def interface_input(self) -> int | None:
+        """
+        Prompts the user to enter the number of blocks to fetch via a graphical interface.
+
+        Returns
+        -------
+        tuple[int, bool] or None
+            The number of blocks to fetch and a confirmation flag (`True` if confirmed).
+            Returns `None` if the user cancels the input.
+        """
+        num_blocks, ok_pressed = QInputDialog.getInt(None, "Number of Blocks", "Enter the number of blocks to fetch:")
+        if ok_pressed:
+            self.validate_input(num_blocks)
+            logger.debug(f"User input for number of blocks via interface: {num_blocks}")
+            return num_blocks
+
+        else:
+            logger.debug("User cancelled input via interface.")
+            return None
+
+
+    @staticmethod
+    @ErrorHandler.ehd(custom_message="The entered value is not an integer.")
+    def get_user_input() -> int:
+        """
+        Prompts the user to enter the number of blocks to fetch and attempts to convert the input to an integer.
+
+        Returns
+        -------
+        int
+            The number of blocks to fetch.
+
+        Raises
+        ------
+        ValueError
+            If the input cannot be converted to an integer.
+        """
+        user_input = input("Enter the number of blocks to fetch: ")
+        logger.debug(f"User input: {user_input}")
+        return int(user_input)
+
+
+    @staticmethod
+    @ErrorHandler.ehd(custom_message="Number of blocks must be greater than 0.")
+    def validate_input(num_blocks: int) -> int:
+        """
+        Validates that the provided number of blocks is greater than 0.
+
+        Parameters
+        ----------
+        num_blocks : int
+            The number of blocks to validate.
+
+        Returns
+        -------
+        int
+            The validated number of blocks.
+
+        Raises
+        ------
+        ValueError
+            If the number of blocks is less than or equal to 0.
+        """
+        if num_blocks <= 0:
+            raise ValueError("Number of blocks must be greater than 0.")
+
+        return num_blocks
+
+
+@ErrorHandler.ehdc()
 class EtherAPI:
     """
     A class for interacting with the Ethereum blockchain via etherscanAPI.
 
-    This class provides methods to retrieve information from the Ethereum blockchain,
-    including the latest block number, block timestamps, and transactions for a specific block.
+    This class provides methods to retrieve the latest block number, block timestamps,
+    and transactions for a specific block.
     
     Attributes
     ----------
-    config : object
-        An object containing configuration settings, including API URL and API key.
+    config : Config
+        Configuration object containing:
+        - API_URL: Base URL for the Etherscan API
+        - API_KEY: Authentication key for API access
+    """
+    def __init__(self, config_instance: Config) -> None:
+        self.config = config_instance
 
-    Methods
-    -------
-    _get_response
-    get_latest_block_number
-    get_block_timestamp
-    get_block_transactions
-    """    
-    def __init__(self, config):
-        self.config = config 
 
-    def _get_response(self, url):
+    def get_latest_block_number(self) -> int:
         """
-        Sends an HTTP GET request to the specified URL and handles the response.
+        Fetches the latest Ethereum block number.
 
-        - This private method sends a request to the given URL and processes the HTTP response. 
-        - It logs information about the request and response, and raises exceptions in case
-          of HTTP errors or request failures.
-        - It is intended for internal use within the `EtherAPI` class to facilitate 
-          communication with the API.
-
-        Parameters
-        ----------
-        url : str
-            The URL to which the HTTP GET request is sent.
-
-        Returns
-        -------
-        requests.Response
-            The response object from the HTTP GET request if the request is successful.
-
-        Raises
-        ------
-        ConnectionError
-            If the HTTP response status code indicates an error (status code >= 400), or if other request exception occurs.
-        """
-        try:            
-            response = requests.get(url)     
-            logger.info(f"Received response with status code: {response.status_code}")      
-            if response.status_code >= 400:               
-                logger.error(f"HTTP error occurred: {response.status_code} - {response.reason}")
-                raise ConnectionError(f"HTTP error occurred: {response.status_code} - {response.reason}")
-            
-            return response            
-            
-        except requests.RequestException as e:           
-            logger.error(f"Request failed: {e}")
-            raise ConnectionError(f"Request failed: {e}") from e
-    
-
-    def get_latest_block_number(self):
-        """
-        Fetches the latest Ethereum block number using the configured API.
+        Returns the number of the most recently mined block in the main chain.
+        This represents the current blockchain height.
 
         Returns
         -------
         int
             The latest block number as an integer.
-
-        Raises
-        ------
-        ValueError
-            If the API response cannot be parsed as JSON.
-            If the API response is empty, or if the block number format in the API response
-            is invalid and cannot be converted from hexadecimal to an integer.
         """
-        url = f"{self.config.API_URL}?module=proxy&action=eth_blockNumber&apikey={self.config.API_KEY}" 
-        response = self._get_response(url)
+        logger.debug("Requesting latest block number from Ethereum API.")
 
-        try:
-            data = response.json()           
+        endpoint = self._build_endpoint('proxy', 'eth_blockNumber')
+        response = self._get_response(endpoint)
+        result = self._parse_response(response, "result")
 
-        except ValueError as e:
-            logger.error(f"Failed to parse JSON response: {e}")
-            raise ValueError("Failed to parse JSON response.") from e
-        
-        result = data.get("result", None)
+        Utils.check_empty_result(result, "result for latest block number")
 
-        if not result:
-            logger.error("Empty result for block number in API response.")
-            raise ValueError("Empty result for block number.")
+        block_number = Utils.hex_to_int(result)
 
-        try:
-            block_number = int(result, 16) 
-            logger.info(f"Latest block number retrieved: {block_number}") 
-            return block_number
+        logger.debug(f"Latest block number retrieved: {block_number}")
 
-        except ValueError as e:
-            logger.error(f"Invalid block number format: {result}")
-            raise ValueError(f"Invalid block number format: {result}") from e
+        return block_number
 
 
-    def get_block_timestamp(self, block_number):
+    def get_block_timestamp(self, block_number: int) -> int:
         """
-        Retrieves the timestamp of a specific block from the Ethereum blockchain.
-
-        This method sends a request to the Ethereum API to retrieve the block details
-        and extracts the timestamp from the response. It converts the timestamp from
-        hexadecimal format to an integer.
+        Retrieves the timestamp of a specific block.
 
         Parameters
         ----------
@@ -212,51 +214,32 @@ class EtherAPI:
         -------
         int
             The timestamp of the block as an integer.
-
-        Raises
-        ------
-        ValueError
-            If the response cannot be parsed as JSON.   
-            If the API response is empty, or if the timestamp format in the API response
-            is invalid and cannot be converted from hexadecimal to an integer.                     
         """
-        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"      
-        logger.info(f"Requesting block timestamp for block number: {block_number}")
-        response = self._get_response(url)           
+        logger.debug(f"Requesting block timestamp for block number: {block_number}")
 
-        try:
-            data = response.json()            
+        params = {
+            'tag': Utils.int_to_hex(block_number),
+            'boolean': 'true'
+        }
+        endpoint = self._build_endpoint('proxy', 'eth_getBlockByNumber', params)
+        response = self._get_response(endpoint)
 
-        except ValueError as e:
-            logger.error(f"Failed to parse JSON response: {e}")
-            raise ValueError("Failed to parse JSON response.") from e 
+        result = self._parse_response(response, "result")
+        Utils.check_empty_result(result, "result for block timestamp")
 
-        result = data.get("result", {})
-        timestamp = result.get("timestamp", None)
-        
-        if not result:
-            logger.error("Empty result for block timestamp in API response.")
-            raise ValueError("Empty result for block timestamp.")
-        
-        if not timestamp:
-            logger.error("Empty timestamp in result.")
-            raise ValueError("Empty timestamp in result.")
-        
-        try:
-            block_timestamp = int(timestamp, 16)
-            logger.info(f"Block timestamp retrieved: {block_timestamp}")
-            return block_timestamp
-        
-        except ValueError as e:
-            logger.error(f"Invalid timestamp format: {timestamp}")
-            raise ValueError(f"Invalid timestamp format: {timestamp}") from e            
-    
-    def get_block_transactions(self, block_number):
+        timestamp = result.get("timestamp")
+        Utils.check_empty_result(timestamp, "timestamp in result")
+
+        block_timestamp = Utils.hex_to_int(timestamp)
+
+        logger.debug(f"Block timestamp retrieved: {block_timestamp}")
+
+        return block_timestamp
+
+
+    def get_block_transactions(self, block_number: int) -> list[dict]:
         """
         Retrieves the transactions from a specific block from the Ethereum blockchain.
-
-        This method sends a request to the Ethereum API to retrieve the list of
-        transactions from the response.
 
         Parameters
         ----------
@@ -265,64 +248,132 @@ class EtherAPI:
 
         Returns
         -------
-        list
-            A list of transactions for the specified block.
-
-        Raises
-        ------
-        ValueError
-            If the API response is empty, or if the transactions format in the API response
-            is invalid or cannot be processed as a list, or if there are no transactions in the result.
+        list[dict]
+            A list of transactions as dictionaries for the specified block.
         """
-        url = f"{self.config.API_URL}?module=proxy&action=eth_getBlockByNumber&tag={block_number}&boolean=true&apikey={self.config.API_KEY}"        
-        logger.info(f"Requesting block transactions for block number: {block_number}")
-        response = self._get_response(url)
-        
-        try:
-            data = response.json()            
+        logger.debug(f"Requesting block transactions for block number: {block_number}")
 
-        except ValueError as e:
-            logger.error(f"Failed to parse JSON response: {e}")
-            raise ValueError("Failed to parse JSON response.") from e 
+        params = {
+            'tag': Utils.int_to_hex(block_number),
+            'boolean': 'true'
+        }
+        endpoint = self._build_endpoint('proxy', 'eth_getBlockByNumber', params)
+        response = self._get_response(endpoint)
+        result = self._parse_response(response, "result")
 
-        result = data.get("result", {})
-        transactions = result.get("transactions", [])
-                
-        if not result:
-            logger.error("Empty result for block transactions in API response.")
-            raise ValueError("Empty result for block transactions.")
-        
-        if not isinstance(transactions, list):
-            logger.error(f"Invalid transactions format: Expected list, got {type(transactions).__name__}.")
-            raise ValueError(f"Invalid transactions format: Expected list, got {type(transactions).__name__}.")
-        
-        if not transactions:
-            logger.error("Empty transactions for transactions result.")
-            raise ValueError("Empty transactions for transactions result.")
-        
-        logger.info(f"Number of transactions retrieved for block number {block_number}: {len(transactions)}")
+        Utils.check_empty_result(result, "result for block transactions")
+
+        transactions = result.get("transactions")
+        Utils.check_empty_result(transactions, "transactions in result")
+        Utils.check_type(transactions, list, "transactions")
+
+        logger.debug(f"Number of transactions retrieved for block number {block_number}: {len(transactions)}")
         return transactions
 
 
+    @staticmethod
+    def _get_response(endpoint: str, timeout: int | None = None) -> requests.Response:
+        """
+        Sends an HTTP GET request to the specified URL and handles the response.
+
+        Parameters
+        ----------
+        endpoint : str
+            The endpoint to which the HTTP GET request is sent.
+        timeout : int, optional
+            The number of seconds as int to wait for connection.
+
+        Returns
+        -------
+        requests.Response
+            The response object from the HTTP GET request if the request is successful.
+
+        Raises
+        ------
+            - `requests.ConnectionError`: When the connection to the server fails.
+            - `requests.Timeout`: When the request times out.
+            - `requests.TooManyRedirects`: When too many redirects are encountered.
+            - `requests.HTTPError`: When the server returns an HTTP error.
+        """
+        logger.debug("Sending GET request")
+        response = requests.get(endpoint, timeout=timeout)
+        response.raise_for_status()
+        logger.debug(f"Request succeeded with status code: {response.status_code}")
+        return response
+
+
+    def _build_endpoint(self, module: str, action: str, params: dict = None) -> str:
+        """
+        Builds an API endpoint URL by appending the provided parameters to a base URL.
+
+        Parameters
+        ----------
+        module : str
+            The module name for the API call (e.g., 'proxy').
+        action : str
+            The action to be performed (e.g., 'eth_getBlockByNumber').
+        params : dict, optional
+            Arbitrary parameters to be included in the URL (e.g., 'tag': 'latest', 'boolean': 'true').
+            If no parameters are provided, the function constructs the URL without any query parameters.
+
+        Returns
+        -------
+        str
+            The constructed endpoint URL.
+        """
+        if params is None:
+            params = {}
+
+        if not self.config.API_URL or not self.config.API_KEY:
+            raise ValueError("Missing API_URL or API_KEY in configuration")
+
+        logger.debug(f"Building endpoint with params: {params}")
+
+        url = f"{self.config.API_URL}?module={module}&action={action}&apikey={self.config.API_KEY}"
+
+        if params:
+            query_string = "&".join(f"{key}={value}" for key, value in params.items())
+            url += f"&{query_string}"
+
+        return url
+
+
+    @staticmethod
+    def _parse_response(response: requests.Response, key: str) -> str | dict:
+        """
+        Parses the JSON response from an API request and retrieves the value associated with the specified key.
+
+        Parameters
+        ----------
+        response : requests.Response
+            The response object from the API request.
+        key : str
+            The key for which the value should be retrieved from the response JSON.
+
+        Returns
+        -------
+        str | dict
+            The value corresponding to the specified key, can be string or dictionary.
+        """
+        logger.debug(f"Parsing response, looking for key: {key}")
+        return response.json().get(key)
+
+
+@ErrorHandler.ehdc()
 class FileManager:
     """
     A class to manage JSON file operations including saving and loading data.
 
-    Parameters
+    Attributes
     ----------
     config : object
         Configuration object containing settings including file paths.
-
-    Methods
-    ----------
-    _get_file_path
-    save_to_json
-    load_from_json
     """
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, config_instance: Config) -> None:
+        self.config = config_instance
 
-    def _get_file_path(self, filename):
+
+    def _get_file_path(self, filename: str) -> str:
         """
         Construct the full file path for the given filename using the config object.
 
@@ -338,38 +389,27 @@ class FileManager:
         """
         return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
 
-    def save_to_json(self, data, filename):
+
+    def save_to_json(self, data: dict, filename: str) -> None:
         """
         Save the provided data to a JSON file at the location specified by the filename.
 
         Parameters
         ----------
-        data : object
+        data : dict
             The data to be saved in JSON format.
         filename : str
             The name of the file where data will be saved.
-
-        Raises
-        ------
-        ValueError
-            If provided data is empty.
-        OSError
-            If there is an error saving the data to the file.
         """
         file_path = self._get_file_path(filename)
-        if not data:
-            logger.error("Cannot save empty data to JSON file.")
-            raise ValueError("Cannot save empty data to JSON file.")
-        try:
-            with open(file_path, 'w') as json_file:
-                json.dump(data, json_file, indent=4)
-            logger.info(f"Block data saved to JSON file: {file_path}")
+        Utils.check_empty_result(data, "data to save")
 
-        except OSError as e:
-            logger.error(f"Failed to save data to {file_path}: {e}")
-            raise OSError("Failed to save data") from e
+        with open(file_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4) #type: ignore
+        logger.info(f"Block data saved to JSON file: {file_path}")
 
-    def load_from_json(self, filename):
+
+    def load_from_json(self, filename: str) -> dict:
         """
         Load data from a JSON file at the location specified by the path and filename.
 
@@ -380,39 +420,60 @@ class FileManager:
 
         Returns
         -------
-        object
+        dict
             The data loaded from the JSON file.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the file does not exist.
-        ValueError
-            If the JSON format is invalid.
-        OSError
-            If there is an error loading data from the file.
         """
         file_path = self._get_file_path(filename)
-
-        try:
-            with open(file_path, 'r') as file:
-                data = json.load(file)
-            logger.info(f"Data loaded from JSON file: {file_path}")
-            return data
-
-        except FileNotFoundError:
-            logger.error(f"File not found: {file_path}. Raising an exception.")
-            raise FileNotFoundError("File not found.")
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Error decoding JSON from file {file_path}: {e}")
-            raise ValueError("Invalid JSON format.") from e 
-
-        except OSError as e:
-            logger.error(f"Failed to load data from {file_path}: {e}")
-            raise OSError("Failed to load data") from e
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+        logger.info(f"Data loaded from JSON file: {file_path}")
+        return data
 
 
+    @staticmethod
+    def remove_file(file_path: str) -> None:
+        """
+        Removes a file from the filesystem.
+
+        Parameters
+        ----------
+        file_path : str
+            The path of the file to be removed.
+        """
+        if not os.path.exists(file_path):
+            logger.warning(f"File not found, skipping removal: {file_path}")
+            return
+
+        os.remove(file_path)
+        logger.info(f"Removed: {file_path}")
+
+
+class Utils:
+
+    @staticmethod
+    @ErrorHandler.ehd()
+    def check_empty_result(result: Any, data_type: str) -> None:
+        if not result:
+                raise ValueError(f"Empty {data_type}.")
+
+    @staticmethod
+    @ErrorHandler.ehd()
+    def hex_to_int(hex_value: str) -> int:
+        return int(hex_value, 16)
+
+    @staticmethod
+    @ErrorHandler.ehd()
+    def int_to_hex(int_number: int) -> str:
+        return hex(int_number)
+
+    @staticmethod
+    @ErrorHandler.ehd()
+    def check_type(data: Any, expected_type: type, data_name: str) -> None:
+        if not isinstance(data, expected_type):
+            raise ValueError(f"Invalid {data_name}"
+                             f" format: Expected {expected_type.__name__}, got {type(data).__name__}.")
+
+# @ErrorHandler.ehdc()
 class BlockTimestampFinder:
     """
     A class for finding the first and last block timestamps on a specific date in a blockchain using a binary search algorithm.
@@ -595,7 +656,7 @@ class BlockTimestampFinder:
         logger.info(f"Last block on {target_date} is {start_block_number}")
         return start_block_number
         
-
+@ErrorHandler.ehdc()
 class BlockDownloader:
     """
     A class to download a single block data from an API and save it to JSON files.
@@ -671,7 +732,7 @@ class BlockDownloader:
         except Exception as e:
             logger.error(f"Error saving block {block_number} data to file: {str(e)}")
 
-
+@ErrorHandler.ehdc()
 class BlockProcessor:
     """
     A class to process blockchain blocks, potentially in a multiprocessing environment.
@@ -781,7 +842,7 @@ class BlockProcessor:
 
         return None, 0
     
-
+@ErrorHandler.ehdc()
 class MultiProcessor:
     """
     A class for managing and processing blocks of data using multiprocessing.
@@ -979,7 +1040,7 @@ class MultiProcessor:
         self.pool.close()
         self.pool.join()
 
-
+@ErrorHandler.ehdc()
 class MainBlockProcessor:
     """
     A central class for orchestrating the processing of blockchain blocks download procedure. 
@@ -987,11 +1048,6 @@ class MainBlockProcessor:
     block downloading, and block processing, ensuring a cohesive workflow.
 
     Parameters
-    ----------
-    config : Config
-        Configuration object containing settings for the processor.
-
-    Attributes
     ----------
     config : Config
         The configuration object.
@@ -1041,14 +1097,16 @@ class MainBlockProcessor:
             If an error occurs while fetching the target block numbers.
         """
         try:
-            latest_block_number = self.api.get_latest_block_number()
-            logger.debug(f"MainBlockProcessor: Fetched latest block number")
+            
+            
 
             if isinstance(block_numbers_or_num_blocks, list):
                 logger.debug(f"MainBlockProcessor: Received list of block numbers")
                 return block_numbers_or_num_blocks
 
             elif isinstance(block_numbers_or_num_blocks, int):
+                latest_block_number = self.api.get_latest_block_number()
+                logger.debug(f"MainBlockProcessor: Fetched latest block number")
                 target_blocks = list(
                     range(
                         latest_block_number - 1,
@@ -1182,12 +1240,16 @@ if __name__ == "__main__":
     """    
     start_time = time.time()
     config = Config()
-    main_block_processor = MainBlockProcessor(config)       
-    block_numbers_or_num_blocks = BlockInput.get_num_blocks_to_fetch()   
+    file_manager = FileManager(config)
+
+    main_block_processor = MainBlockProcessor(config)
+    block_input = BlockInput()
+    # block_numbers_or_num_blocks = BlockInput.get_num_blocks_to_fetch()
+
     main_block_processor.run(
-        block_numbers_or_num_blocks,
+        block_input.get_num_blocks_to_fetch(),
         progress_callback=lambda total, current: print(f"Postęp: {current}/{total}"),
-        check_interrupt=lambda: False  
+        check_interrupt=lambda: False
     )
     end_time = time.time()
     execution_time = end_time - start_time
