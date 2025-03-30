@@ -1,6 +1,5 @@
 import os
 from dotenv import load_dotenv
-
 load_dotenv()
 
 class Config:
@@ -9,11 +8,10 @@ class Config:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance.initialize()
+            cls._instance.__init__()
         return cls._instance
 
-    def initialize(self):
-
+    def __init__(self):
         self.BASE_DIR = os.getenv("APP_BASE_DIR", os.getcwd())
         self.API_KEY = os.getenv("API_KEY", "")
         self.API_URL = os.getenv("API_URL", "https://api.etherscan.io/api")
