@@ -1,24 +1,24 @@
 import os
-import sqlite3
 import json
 from config import Config 
 from database_tool import DatabaseManager
 from logger import logger
-from error_handler import CustomProcessingError as cpe
+from error_handler import ErrorHandler
 
-@cpe.ehdc()
+
+@ErrorHandler.ehdc()
 class FilesChecker:
     def __init__(self, config, database_manager):
         self.config = config
         self.database_manager = database_manager
-    
-    
+
+
     def ensure_directory(self, path):
         if not os.path.exists(path):
             os.makedirs(path)
             logger.info(f'Directory "{path}" was successfully created.')
 
-    
+
     def ensure_file(self, path, initializer=None):
         if not os.path.exists(path):
             with open(path, 'w') as f:
@@ -26,7 +26,7 @@ class FilesChecker:
                     initializer()
             logger.info(f'File "{path}" was successfully created.')
 
-    
+
     def initialize_wallets_activity(self):
         with open(self.config.WALLETS_ACTIVITY_FILENAME, 'w') as json_file:
             json.dump({}, json_file)
