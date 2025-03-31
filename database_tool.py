@@ -138,11 +138,17 @@ class BiggestWalletsData:
 
                         top_buy_amount = top_buy_transaction.get('amount')
                         top_buy_date_str = top_buy_transaction.get('date')
-                        top_buy_date = datetime.strptime(top_buy_date_str, "%Y-%m-%d").date() if top_buy_date_str else None
+                        if top_buy_date_str:
+                            top_buy_date = datetime.strptime(top_buy_date_str, "%Y-%m-%d").date()
+                        else:
+                            top_buy_date = None
 
                         top_sell_amount = top_sell_transaction.get('amount')
                         top_sell_date_str = top_sell_transaction.get('date')
-                        top_sell_date = datetime.strptime(top_sell_date_str, "%Y-%m-%d").date() if top_sell_date_str else None
+                        if top_sell_date_str:
+                            top_sell_date = datetime.strptime(top_sell_date_str, "%Y-%m-%d").date()
+                        else:
+                            top_sell_date = None
                         
                         for entry in balance_history:
                             date_str = entry['date']
@@ -153,7 +159,8 @@ class BiggestWalletsData:
                             last_update_date_str = datetime.now().strftime("%Y-%m-%d")
                             last_update_date = datetime.strptime(last_update_date_str, "%Y-%m-%d").date()
 
-                            select_query = 'SELECT * FROM wallet_balance WHERE wallet_address = ? AND date = ? AND balance = ?'        
+                            select_query = ('SELECT * FROM wallet_balance WHERE wallet_address = ? AND date = ?'
+                                            ' AND balance = ?')
                                 
                             select_params = (wallet_address, date, balance)
 
@@ -161,7 +168,8 @@ class BiggestWalletsData:
 
 
                             if existing_entry:
-                                print(f"Entry for wallet {wallet_address}, date {date}, and balance {balance} already exists.")
+                                print(f"Entry for wallet {wallet_address}, date {date}, "
+                                      f"and balance {balance} already exists.")
                             else:
                                 db.execute_query('''
                                     INSERT OR REPLACE INTO wallet_balance (
