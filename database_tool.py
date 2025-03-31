@@ -3,9 +3,11 @@ import json
 from datetime import datetime
 import os
 from config import Config
-from error_handler import CustomProcessingError as cpe
-from logger import LoggerConfig
+from error_handler import ErrorHandler
+from logger import logger
 
+
+@ErrorHandler.ehdc()
 class DatabaseManager:
     def __init__(self, db_filename):
         self.db_filename = db_filename
@@ -18,7 +20,6 @@ class DatabaseManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
-    @cpe.ehd()
     def connect(self):         
         self.connection = sqlite3.connect(self.db_filename)
         logger.info(f"Connected to database '{self.db_filename}' successfully.")
@@ -29,7 +30,6 @@ class DatabaseManager:
             self.connection = None
             logger.info(f"Disconnected from database '{self.db_filename}'.")
 
-    @cpe.ehd()
     def execute_query(self, query, parameters=None):        
         cursor = self.connection.cursor()
         if parameters:
@@ -45,13 +45,12 @@ class DatabaseManager:
         return cursor
 
 
+@ErrorHandler.ehdc()
 class DataCalculator:
     def __init__(self, db_manager):
         self.db_manager = db_manager
 
-    @cpe.ehd()
     def table_data_calculations(self, entry, data_type):
-
         with self.db_manager as db:            
                 date = entry.get('time')
                 transactions_number = entry.get('transactions number')
@@ -96,15 +95,15 @@ class DataCalculator:
                     db.execute_query(insert_query, insert_params)
 
 
+@ErrorHandler.ehdc()
 class DataImporter:
-    def __init__(self, db_manager, data_calculator):
+    def __init__(self, config, db_manager, data_calculator):
+        self.config = config
         self.db_manager = db_manager
         self.data_calculator = data_calculator
 
-    @cpe.ehd()
-    def import_data_to_combined_table(self, input_file_name, db_filename, data_type, progress_callback=None, check_interrupt=None):        
-        
-            input_file_path = os.path.join(current_directory, "interesting_info", input_file_name)  
+    def import_data_to_combined_table(self, input_file_name, data_type):
+            input_file_path = os.path.join(self.config.BASE_DIR, "interesting_info", input_file_name)
 
             with open(input_file_path, "r") as file:
                 data = json.load(file)
@@ -117,14 +116,14 @@ class DataImporter:
                 self.data_calculator.table_data_calculations(data, data_type)
 
 
+@ErrorHandler.ehdc()
 class BiggestWalletsData:
-    def __init__(self, db_manager):
-        self.db_manager = db_manager
+    def __init__(self, config, db_manager):
+        self.config = config
+        self.db_manager = db_manager        
 
-    @cpe.ehd()
-    def save_biggest_wallets_activity_database(self, input_file_name, db_filename):
-
-        input_file_path = os.path.join(current_directory, "interesting_info", input_file_name) 
+    def save_biggest_wallets_activity_database(self, input_file_name):
+        input_file_path = os.path.join(self.config.BASE_DIR, "interesting_info", input_file_name)
 
         with self.db_manager as db:                     
                 with open(input_file_path, "r") as file:
@@ -134,15 +133,15 @@ class BiggestWalletsData:
                     if isinstance(wallet_info, dict):
                         balance_history = wallet_info.get('balance_history', [])
 
-                        top_buy_transaction = wallet_info.get('top_buy_transaction', None)
-                        top_sell_transaction = wallet_info.get('top_sell_transaction', None)
+                        top_buy_transaction = wallet_info.get('top_buy_transaction', {})
+                        top_sell_transaction = wallet_info.get('top_sell_transaction', {})
 
-                        top_buy_amount = top_buy_transaction.get('amount', None) if top_buy_transaction else None
-                        top_buy_date_str = top_buy_transaction.get('date', None) if top_buy_transaction else None
+                        top_buy_amount = top_buy_transaction.get('amount')
+                        top_buy_date_str = top_buy_transaction.get('date')
                         top_buy_date = datetime.strptime(top_buy_date_str, "%Y-%m-%d").date() if top_buy_date_str else None
 
-                        top_sell_amount = top_sell_transaction.get('amount', None) if top_sell_transaction else None
-                        top_sell_date_str = top_sell_transaction.get('date', None) if top_sell_transaction else None
+                        top_sell_amount = top_sell_transaction.get('amount')
+                        top_sell_date_str = top_sell_transaction.get('date')
                         top_sell_date = datetime.strptime(top_sell_date_str, "%Y-%m-%d").date() if top_sell_date_str else None
                         
                         for entry in balance_history:
@@ -177,13 +176,12 @@ class BiggestWalletsData:
                                 ))
                 
 
+@ErrorHandler.ehdc()
 class DataChecker:
     def __init__(self, db_manager):
         self.db_manager = db_manager
 
-    @cpe.ehd()
-    def check_date_in_database(self, selected_date, chart_name, sql_query_check):    
-
+    def check_date_in_database(self, selected_date, sql_query_check):
             with self.db_manager as db:    
                 cursor = db.execute_query(sql_query_check, (selected_date.strftime("%Y-%m-%d"),))                
                 result = cursor.fetchone()
@@ -191,14 +189,12 @@ class DataChecker:
                 return bool(result)
 
 
-
+@ErrorHandler.ehdc()
 class DataCleaner:
     def __init__(self, db_manager):
         self.db_manager = db_manager
 
-    @cpe.ehd()
-    def remove_invalid_entries(self):       
-
+    def remove_invalid_entries(self):
         with self.db_manager as db:        
                 delete_query = '''
                     DELETE FROM combined_data
@@ -214,16 +210,14 @@ class DataCleaner:
                 '''
 
                 db.execute_query(delete_query)
-            
 
 
+@ErrorHandler.ehdc()
 class DataReader:
     def __init__(self, db_manager):
         self.db_manager = db_manager
 
-    @cpe.ehd()
-    def read_and_display_data_from_database(self):   
-
+    def read_and_display_data_from_database(self):
         with self.db_manager as db:                  
                 db.connection.row_factory = sqlite3.Row 
                 rows = db.execute_query('SELECT * FROM wallet_balance').fetchall()
@@ -248,13 +242,13 @@ class DataReader:
                     print("Top Sell Date:", top_sell_date)
                     print("\n")
 
+
+@ErrorHandler.ehdc()
 class DataDisplay:
     def __init__(self, db_manager):
         self.db_manager = db_manager
-        
-    @cpe.ehd()
-    def print_combined_data_by_type(self, data_type):    
 
+    def print_combined_data_by_type(self, data_type):
         with self.db_manager as db:
                 rows = db.execute_query('SELECT * FROM combined_data WHERE data_type = ?', (data_type,)).fetchall()
                 for row in rows:
@@ -274,7 +268,31 @@ class DataDisplay:
                     print("\n")
 
 
+@ErrorHandler.ehdc()
+class DatabaseFactory:
+    @staticmethod
+    def create_database_components(config: Config = None):
+        config = config or Config()
+        db_filename = config.DB_FILENAME
+        database_manager = DatabaseManager(db_filename)
+        data_calculator = DataCalculator(database_manager)
+
+        return {
+            "database_manager": database_manager,
+            "data_reader": DataReader(database_manager),
+            "data_display": DataDisplay(database_manager),
+            "data_checker": DataChecker(database_manager),
+            "data_calculator": data_calculator,
+            "data_importer": DataImporter(config, database_manager, data_calculator),
+            "data_cleaner": DataCleaner(database_manager),
+            "save_biggest_wallets": BiggestWalletsData(config, database_manager),
+        }
+
+
 if __name__ == "__main__":
+    """
+    mainly for testing    
+    """
     config = Config()
     db_filename = config.DB_FILENAME
     database_manager = DatabaseManager(db_filename)
@@ -282,7 +300,8 @@ if __name__ == "__main__":
     data_display = DataDisplay(database_manager)
     data_checker = DataChecker(database_manager)    
     data_calculator = DataCalculator(database_manager)
-    data_importer = DataImporter(database_manager, data_calculator)
+    data_importer = DataImporter(config, database_manager, data_calculator)
+    data_cleaner = DataCleaner(database_manager)
     data_type =  "daily"
     input_file_name = "2024-10-02_daily_data.json"
 
