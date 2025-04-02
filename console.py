@@ -1,29 +1,18 @@
-import json
-import os
-import time
-import datetime
 import blocks_download
-from datetime import datetime, timezone
 import blocks_extractor
 import wallets_update
 import files_checker
 import database_tool
 from datetime import datetime
-import asyncio
-import blocks_remover
-import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QMenuBar, QVBoxLayout, QWidget, QPushButton
-import sqlite3
-import cProfile
-from datetime import datetime
 import config
+import blocks_remover
 
 if __name__ == "__main__":
-    current_directory = os.path.dirname(__file__)
-    input_file_path = os.path.join(current_directory, "baza_danych.db") 
-    blocks_data_folder = "blocks_data"
-    blocks_data_path = os.path.join(current_directory, blocks_data_folder)
-    db_filename = input_file_path
+    # current_directory = os.path.dirname(__file__)
+    # input_file_path = os.path.join(current_directory, "baza_danych.db") 
+    # blocks_data_folder = "blocks_data"
+    # blocks_data_path = os.path.join(current_directory, blocks_data_folder)
+    # db_filename = input_file_path
     files_checker.check_files()
 
     print()
@@ -64,10 +53,15 @@ if __name__ == "__main__":
         wallets_update.save_top_wallets_info(input_file_name)
 
     elif choice == "5":
-        input_folder = blocks_data_path
-        delete_start_time = datetime.datetime(2024, 5, 15, 0, 0, 0)  
-        delete_end_time = datetime.datetime(2024, 5, 30, 23, 0, 0)         
-        blocks_remover.remove_blocks_in_time_range(input_folder, delete_start_time, delete_end_time)
+        # input_folder = blocks_data_path
+        config = config.Config()
+        blocks_remover = blocks_remover.BlocksRemover(config)
+
+
+        delete_start_time = datetime(2024, 12, 1, 0, 0, 0)  
+        delete_end_time = datetime(2024, 12, 31, 23, 0, 0)         
+
+        blocks_remover.remove_blocks_in_time_range(delete_start_time, delete_end_time)
         
     elif choice == "6":        
         input_file_name = "2024-07-09_daily_data.json"        
@@ -94,7 +88,7 @@ if __name__ == "__main__":
 
     elif choice == "11":
         start_date = "2024-07-01"        
-        update_interval = 0.1  # Interwał w minutach
+        update_interval = 0.1
         automator = automation.BlockAutomator(start_date, update_interval)
         automator.run()            
 
@@ -102,10 +96,10 @@ if __name__ == "__main__":
 
         config = config.Config()
         api = blocks_download.EtherAPI(config=config)        
-        block_timestamp_finder = blocks_download.BlockTimestampFinder(api=api)
+        block_timestamp_finder = blocks_download.BlockTimestampFinder(ether_api=api)
         
         try:
-            target_date = "2024-08-01"
+            target_date = "2024-08-05"
             first_block_number = block_timestamp_finder.get_timestamp_of_first_block_on_target_date(target_date)
             print(f"The first block on {target_date} is: {first_block_number}")
         except Exception as e:
@@ -115,15 +109,14 @@ if __name__ == "__main__":
 
         config = config.Config()
         api = blocks_download.EtherAPI(config=config)        
-        block_timestamp_finder = blocks_download.BlockTimestampFinder(api=api)
+        block_timestamp_finder = blocks_download.BlockTimestampFinder(ether_api=api)
         
         try:
-            target_date = "2024-08-01"
+            target_date = "2024-08-05"
             first_block_number = block_timestamp_finder.get_timestamp_of_last_block_on_target_date(target_date)
-            print(f"The first block on {target_date} is: {first_block_number}")
+            print(f"The last block on {target_date} is: {first_block_number}")
         except Exception as e:
             print(f"An error occurred: {e}")   
 
     else:
-        print("Błędny wybór.")   
-        
+        print("Błędny wybór.")
