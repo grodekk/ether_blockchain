@@ -1,10 +1,9 @@
 import sqlite3
 import mplcursors
-from matplotlib.patches import FancyArrowPatch
-from matplotlib.patches import FancyBboxPatch
-from PyQt5.QtWidgets import QDateEdit
-from datetime import datetime
-
+from config import Config
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from error_handler import ErrorHandler
 
 chart_config = {
     "WYKRESY GODZINOWE": {
@@ -215,6 +214,7 @@ chart_config = {
 }
 }
 
+@ErrorHandler.ehdc()
 class ChartHandler:
     def __init__(self, canvas, db_filename):
         self.canvas = canvas
@@ -233,8 +233,9 @@ class ChartHandler:
         cursor.execute(sql_query)
         data = cursor.fetchall()      
 
-        data_x = [row[0] for row in data]        
+        data_x = [row[0] for row in data]                
         data_y = [row[1] for row in data]
+        
          
         sorted_indices = sorted(range(len(data_x)), key=lambda i: data_x[i])
         data_x = [data_x[i] for i in sorted_indices]
@@ -335,3 +336,44 @@ class ChartHandler:
         self.canvas.draw()    
     
         conn.close() 
+
+
+if __name__ == "__main__":
+    """
+    mainly for testing
+    """
+
+    config = Config()
+    db_filename = config.DB_FILENAME
+
+    chart_config = {
+        "WYKRESY DZIENNE": {
+            "ILOŚĆ TRANSAKCJI": {
+                "sql_query": 'SELECT date, transactions_number FROM combined_data WHERE data_type="daily"',
+                "label": "Liczba transakcji",
+                "title": "Liczba transakcji w poszczególnych dniach",
+                "ylabel": "Liczba transakcji",
+            }
+        }
+    }
+
+    try:
+        fig = plt.figure(figsize=(10, 6))
+        canvas = FigureCanvas(fig)
+
+        chart_data = chart_config["WYKRESY DZIENNE"]["ILOŚĆ TRANSAKCJI"]
+        sql_query = chart_data["sql_query"]
+        label = chart_data["label"]
+        title = chart_data["title"]
+        ylabel = chart_data["ylabel"]
+
+        chart_handler = ChartHandler(canvas, db_filename)
+
+        chart_handler.chart_builder(sql_query, label, title, ylabel)
+
+        canvas.draw()
+        plt.show()
+        print("Wykres został wyświetlony poprawnie.")
+
+    except Exception as e:
+        print(f"Error: {e}")
