@@ -2,7 +2,7 @@ import time
 import os
 import schedule
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from blocks_download import MainBlockProcessor, FileManager, BlockTimestampFinder, EtherAPI
 from config import Config
 import blocks_extractor
@@ -10,9 +10,10 @@ import wallets_update
 import database_tool
 import blocks_remover
 from logger import logger
-from error_handler import CustomProcessingError as cpe
+from error_handler import ErrorHandler, CustomProcessingError
 
 
+@ErrorHandler.ehdc()
 class TaskScheduler:
     def __init__(self, block_processor, update_interval, check_interrupt=None):
         self.block_processor = block_processor
@@ -21,7 +22,6 @@ class TaskScheduler:
         self.is_running = False
 
 
-    @cpe.ehd()
     def run(self):                           
         self.schedule_regular_updates()
         while True:            
@@ -35,7 +35,6 @@ class TaskScheduler:
             time.sleep(1)  
 
 
-    @cpe.ehd()
     def schedule_regular_updates(self):
         logger.info("Scheduling regular updates.")
         self.clear_scheduled_tasks()                  
@@ -72,6 +71,7 @@ class TaskScheduler:
             logger.debug(f"Job: {job} - Time interval: {job.interval} {job.unit} - Last time activated: {job.last_run}")
 
 
+@ErrorHandler.ehd()
 class BlockProcessor:
     def __init__(self,
                  config,
@@ -141,6 +141,7 @@ class BlockProcessor:
             self.data_processor.update_all_tasks(target_date)
 
 
+@ErrorHandler.ehdc()
 class BlockFetcher:
 
     def __init__(self, config, file_manager, main_block_processor, progress_manager, progress_callback=None, check_interrupt=None):               
@@ -175,7 +176,7 @@ class BlockFetcher:
                 logger.info(f"Number of new blocks: {len(new_blocks)}.")
                 self.main_block_processor.run(new_blocks, progress_callback=self.progress_callback, check_interrupt=self.check_interrupt)
 
-                if check_interrupt():
+                if self.check_interrupt():
                     logger.info("Block fetching stopped by user")
                     return []
 
@@ -188,7 +189,7 @@ class BlockFetcher:
         return list(new_blocks_set - fetched_blocks_set)
 
     
-
+@ErrorHandler.ehdc()
 class ProgressManager:
     def __init__(self, config, ether_api, check_interrupt=None):
         self.config = config
@@ -259,8 +260,8 @@ class ProgressManager:
         return target_date == datetime.utcnow().date().strftime("%Y-%m-%d")
 
 
+@ErrorHandler.ehdc()
 class DataProcessor:
-
     def __init__(self, config, progress_manager):
         self.config = config
         self.progress_manager = progress_manager
@@ -296,41 +297,40 @@ class DataProcessor:
         hourly_extractor.extract_data(extract_date)
 
 
-
     def generate_daily_report(self, target_date):
         extract_date = f"{target_date} 00:00:00"
         daily_extractor = blocks_extractor.ExtractorFactory.create_extractor('daily', extract_date)
         daily_extractor.extract_data(extract_date)
-
-    
-        
+            
 
     def update_wallet_balances(self, target_date):        
-        input_file_name = f"{target_date}_daily_data.json"
-        wallets_update.save_top_wallets_info(input_file_name)
+        input_file_name = f"{target_date}_daily_data.json"        
+        wallets_updater = wallets_update.WalletUpdaterFactory.create_wallets_updater(self.config)
+        wallets_updater.save_top_wallets_info(input_file_name)
 
 
-    def export_to_database(self, target_date):        
-        db_filename = self.config.DB_FILENAME         
+    def export_to_database(self, target_date):
+        database_factory = database_tool.DatabaseFactory.create_database_components()
         input_file_name = f"{target_date}_daily_data.json"
         data_type = "daily"
-        database_tool.import_data_to_combined_table(input_file_name, db_filename, data_type)
+        database_factory['data_importer'].import_data_to_combined_table(input_file_name, data_type)             
         data_type = "hourly"
         input_file_name = f"{target_date}_hourly_data.json"
-        database_tool.import_data_to_combined_table(input_file_name, db_filename, data_type)      
+        database_factory['data_importer'].import_data_to_combined_table(input_file_name, data_type)        
         input_file_name = "Biggest_wallets_activity.json"
-        database_tool.save_biggest_wallets_activity_database(input_file_name, db_filename)   
+        database_factory['save_biggest_wallets'].save_biggest_wallets_activity_database(input_file_name)           
 
 
-    def clean_blocks_data(self, target_date):
-        first_block = self.progress[target_date]["first_block"]
-        last_block = self.progress[target_date]["last_block"]
+    def clean_blocks_data(self, target_date):       
+        first_block, last_block = self.progress_manager.get_block_range_for_date(target_date)
         blocks_remover.remove_blocks_in_range(first_block, last_block)
         print("Czyszczenie zakończone")
 
 
+
 class AutomationFactory:
     @staticmethod
+    @ErrorHandler.ehdc()
     def create_automator(config, start_date, update_interval=0.01, progress_callback=None, check_interrupt=None):        
         ether_api = EtherAPI(config)
         file_manager = FileManager(config)

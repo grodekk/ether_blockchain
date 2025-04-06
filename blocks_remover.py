@@ -1,38 +1,60 @@
-import os
-from datetime import datetime
-import json
-import time
+from datetime import datetime, timezone
+from blocks_download import FileManager, Config
+from logger import logger
+from error_handler import ErrorHandler
+from pathlib import Path
 
-current_directory = os.path.dirname(__file__)
+@ErrorHandler.ehdc()
+class BlocksRemover:
+    def __init__(self, config, file_manager):
+        self.config = config
+        self.file_manager = file_manager
 
-def remove_blocks_in_time_range(input_folder, delete_start_time, delete_end_time, progress_callback=None, check_interrupt=None):
-    json_files = [file for file in os.listdir(input_folder) if file.endswith(".json")]
 
-    for json_file in json_files:
-        print('asd')
-        with open(os.path.join(input_folder, json_file), 'r+') as file:
-            block_data = json.load(file)
-            block_timestamp = int(block_data["timestamp"])
-            block_datetime_utc = datetime.utcfromtimestamp(block_timestamp)
-                        
-            if delete_start_time <= block_datetime_utc <= delete_end_time:
-                file.close()
-                os.remove(os.path.join(input_folder, json_file))
-                print(f"Removed: {json_file}")
-                
+    def remove_blocks_in_time_range(self,
+                                    delete_start_time,
+                                    delete_end_time,
+                                    progress_callback=None,
+                                    check_interrupt=None):
 
-def remove_blocks_in_range(first_block, last_block):
-        input_folder =  os.path.join(current_directory, "blocks_data")  
-        start_time = time.time()
-        for block_num in range(first_block, last_block + 1):
-            print(f'deleted - {block_num}')
-            block_file_name = f"block_{block_num}.json"
-            block_file_path = os.path.join(input_folder, block_file_name)
-            
-            if os.path.exists(block_file_path):
-                os.remove(block_file_path)
-                print(f"Usunięto: {block_file_name}")
-            else:
-                print(f"Plik nie istnieje: {block_file_name}")
-        end_time = time.time()
-        total_execution_time = end_time - start_time
+        files_to_remove = []     
+        for json_file in self.config.JSON_FILES:
+            file_path = Path(self.config.BLOCKS_DATA_DIR) / json_file
+            block_data = self.file_manager.load_from_json(json_file)
+
+            if self.should_remove_block(block_data, delete_start_time, delete_end_time):
+                files_to_remove.append(file_path)
+
+        if files_to_remove:
+            self.remove_files(files_to_remove)
+
+        logger.info(f"Removed {len(files_to_remove)} blocks")
+
+    
+    def remove_blocks_in_range(self, first_block, last_block):
+        files_to_remove = [
+            Path(self.config.BLOCKS_DATA_DIR) / f"block_{block_num}.json"
+            for block_num in range(first_block, last_block + 1)
+        ]
+
+        self.remove_files(files_to_remove)
+
+
+    @staticmethod
+    def should_remove_block(block_data, delete_start_time, delete_end_time):
+        block_timestamp = int(block_data["timestamp"])
+        block_datetime_utc = datetime.fromtimestamp(block_timestamp, tz=timezone.utc)
+
+        return delete_start_time <= block_datetime_utc <= delete_end_time
+
+    
+    def remove_files(self, files_to_remove):
+        for file_path in files_to_remove:
+            self.file_manager.remove_file(file_path)
+
+
+if __name__ == "__main__":
+    config = Config()
+    file_manager = FileManager(config)
+    remover = BlocksRemover(config, file_manager)
+    remover.remove_blocks_in_range(1, 10)

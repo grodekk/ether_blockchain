@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from config import Config
 from logger import logger
 from error_handler import ErrorHandler, CustomProcessingError
-from typing import Any, TextIO
+from typing import Any
 
 
 class BlockInput:
@@ -170,8 +170,8 @@ class EtherAPI:
         - API_URL: Base URL for the Etherscan API
         - API_KEY: Authentication key for API access
     """
-    def __init__(self, config_instance: Config) -> None:
-        self.config = config_instance
+    def __init__(self, config: Config) -> None:
+        self.config = config
 
 
     def get_latest_block_number(self) -> int:
@@ -366,11 +366,53 @@ class FileManager:
 
     Attributes
     ----------
-    config : object
+    config : Config
         Configuration object containing settings including file paths.
     """
-    def __init__(self, config_instance: Config) -> None:
-        self.config = config_instance
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+
+    def save_to_json(self, data: dict | list, filename: str) -> None:
+        """
+        Save the provided data to a JSON file at the location specified by the filename.
+
+        Parameters
+        ----------
+        data : dict or list
+            The data to be saved in JSON format.
+        filename : str
+            The name of the file where data will be saved.
+        """
+        file_path = self._get_file_path(filename)
+        Utils.check_empty_result(data, "data to save")
+
+        with open(file_path, 'w') as json_file:
+            json.dump(data, json_file, indent=4) #type: ignore
+
+        logger.debug(f"Block data saved to JSON file: {file_path}")
+
+
+    def load_from_json(self, filename: str) -> dict | list:
+        """
+        Load data from a JSON file at the location specified by the path and filename.
+
+        Parameters
+        ----------
+        filename : str
+            The name of the file to load data from.
+
+        Returns
+        -------
+        dict or list
+            The data loaded from the JSON file.
+        """
+        file_path = self._get_file_path(filename)
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+
+        logger.debug(f"Data loaded from JSON file: {file_path}")
+        return data
 
 
     def _get_file_path(self, filename: str) -> str:
@@ -390,46 +432,6 @@ class FileManager:
         return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
 
 
-    def save_to_json(self, data: dict, filename: str) -> None:
-        """
-        Save the provided data to a JSON file at the location specified by the filename.
-
-        Parameters
-        ----------
-        data : dict
-            The data to be saved in JSON format.
-        filename : str
-            The name of the file where data will be saved.
-        """
-        file_path = self._get_file_path(filename)
-        Utils.check_empty_result(data, "data to save")
-
-        with open(file_path, 'w') as json_file:
-            json.dump(data, json_file, indent=4) #type: ignore
-        logger.info(f"Block data saved to JSON file: {file_path}")
-
-
-    def load_from_json(self, filename: str) -> dict:
-        """
-        Load data from a JSON file at the location specified by the path and filename.
-
-        Parameters
-        ----------
-        filename : str
-            The name of the file to load data from.
-
-        Returns
-        -------
-        dict
-            The data loaded from the JSON file.
-        """
-        file_path = self._get_file_path(filename)
-        with open(file_path, 'r') as file:
-            data = json.load(file)
-        logger.info(f"Data loaded from JSON file: {file_path}")
-        return data
-
-
     @staticmethod
     def remove_file(file_path: str) -> None:
         """
@@ -445,149 +447,160 @@ class FileManager:
             return
 
         os.remove(file_path)
-        logger.info(f"Removed: {file_path}")
+        logger.debug(f"Removed: {file_path}")
 
 
+@ErrorHandler.ehdc()
 class Utils:
 
     @staticmethod
-    @ErrorHandler.ehd()
     def check_empty_result(result: Any, data_type: str) -> None:
         if not result:
                 raise ValueError(f"Empty {data_type}.")
 
     @staticmethod
-    @ErrorHandler.ehd()
     def hex_to_int(hex_value: str) -> int:
         return int(hex_value, 16)
 
     @staticmethod
-    @ErrorHandler.ehd()
     def int_to_hex(int_number: int) -> str:
         return hex(int_number)
 
     @staticmethod
-    @ErrorHandler.ehd()
     def check_type(data: Any, expected_type: type, data_name: str) -> None:
         if not isinstance(data, expected_type):
             raise ValueError(f"Invalid {data_name}"
                              f" format: Expected {expected_type.__name__}, got {type(data).__name__}.")
 
-# @ErrorHandler.ehdc()
-class BlockTimestampFinder:
+
+@ErrorHandler.ehdc()
+class BlockDownloader:
     """
-    A class for finding the first and last block timestamps on a specific date in a blockchain using a binary search algorithm.
+    A class to download a single block data from an API and save it to JSON files.
 
     Parameters
     ----------
-    api : object
-        An API instance that provides methods to fetch the latest block number and block timestamps.
-
-    Methods
-    -------
-    get_timestamp_of_first_block_on_target_date  
-    get_timestamp_of_last_block_on_target_date
+    ether_api : EtherAPI
+        An API object that implements methods to fetch block timestamps and transactions.
+    file_manager : FileManager
+        A file manager object that implements a method for saving data to JSON files.
     """
-    def __init__(self, api):
-        self.api = api
 
-    def _validate_date(self, date_str):
+    def __init__(self, ether_api: EtherAPI, file_manager: FileManager, config: Config) -> None:
+        self.ether_api = ether_api
+        self.file_manager = file_manager
+        self.config = config
+
+
+    def download_single_block(self, block_number: int, fetched_block_numbers: list) -> None:
         """
-        This private method validates if the input string is a valid date in the format YYYY-MM-DD.
+        Downloads data for a single block from the API and saves it to a JSON file.
 
         Parameters
         ----------
-        date_str : str
-            The date string to validate.
+        block_number : int
+            The number of the block for which data is to be fetched.
+        fetched_block_numbers : list of int
+            A list of block numbers that have already been fetched.
+            The block with `block_number` will be skipped if it is in this list.
 
         Returns
         -------
-        bool
-            True if the date string is valid, False otherwise.
+        None
+            This method does not return any value.
 
         Raises
         ------
-        ValueError
-            If the date format is invalid.
+        Exception
+            If an error occurs during the fetching of block timestamp or transactions, or while saving data to a file.
         """
+        logger.debug(f"Downloading single block: {block_number}")
+
+        if self.check_fetched_blocks(block_number, fetched_block_numbers):
+            return
+
         try:
-            datetime.strptime(date_str, "%Y-%m-%d")
+            timestamp = self.ether_api.get_block_timestamp(block_number)
+            transactions = self.ether_api.get_block_transactions(block_number)
+
+            block_data = {
+                "block_number": block_number,
+                "timestamp": timestamp,
+                "transactions": transactions
+            }
+
+            file_path = f"block_{block_number}.json"
+
+            self.file_manager.save_to_json(block_data, file_path)
+            fetched_block_numbers.append(block_number)
+            self.file_manager.save_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
+
+        except Exception:
+            logger.error(f"Error while downloading block {block_number}")
+            raise
+
+        logger.debug(f"Single block: {block_number} download successful")
+
+    @staticmethod
+    def check_fetched_blocks(block_number: int, fetched_block_numbers: list) -> bool:
+        if block_number in fetched_block_numbers:
+            logger.debug(f"Block {block_number} already fetched. Skipping...")
             return True
+        return False
 
-        except ValueError:
-            return False
 
-    def get_timestamp_of_first_block_on_target_date(self, target_date):
+@ErrorHandler.ehdc()
+class BlockTimestampFinder:
+    """
+    A class for finding the first and last block number based on a specific date in a blockchain using a
+    binary search algorithm.
+
+    Parameters
+    ----------
+    ether_api : EtherAPI
+        An API instance that provides methods to fetch the latest block number and block timestamps.
+    """
+    def __init__(self, ether_api: EtherAPI):
+        self.ether_api = ether_api
+        self.max_iterations = 100
+
+    def get_timestamp_of_first_block_on_target_date(self, target_date: str) -> int:
         """
-        Finds the block number of the first block mined on the specified target date.
+        Finds the first block number mined in a specified target date.
 
         Parameters
         ----------
         target_date : str
-            The target date in the format YYYY-MM-DD.
+            The target date in the format 'YYYY-MM-DD'.
 
         Returns
         -------
         int
-            The block number of the first block on the target date.
-
-        Raises
-        ------
-        ValueError
-            If the date format is invalid.
-        RuntimeError
-            If there is an error initializing the search or fetching the block timestamp.
+            The block number of the first block on the given date.
         """
-        if not self._validate_date(target_date):
-            logger.error(f"Invalid target date format: {target_date}")
-            raise ValueError("Date must be in the format YYYY-MM-DD")
-
         logger.info(f"Starting search for the first block on {target_date}")
-        
-        try:
-            target_timestamp = int(datetime.strptime(target_date + " 00:00", "%Y-%m-%d %H:%M")
-                                   .replace(tzinfo=timezone.utc).timestamp())
-            latest_block_number = self.api.get_latest_block_number()
 
-        except Exception as e:
-            logger.error(f"Error initializing search: {e}")
-            raise RuntimeError("Failed to initialize the search for the first block timestamp.") from e
-        
-        start_block_number = latest_block_number
+        self._validate_date(target_date)
+
+        target_timestamp = self._get_target_timestamp(target_date)
+
+        start_block_number = self.ether_api.get_latest_block_number()
         end_block_number = 0
-        
-        while start_block_number > end_block_number:
-            mid_block_number = (start_block_number + end_block_number) // 2
-            
-            try:
-                mid_block_timestamp = self.api.get_block_timestamp(hex(mid_block_number))
-                logger.debug(f"Checking block number: {mid_block_number}, Timestamp: {mid_block_timestamp}")
 
-            except Exception as e:
-                logger.error(f"Error fetching block timestamp for block {mid_block_number}: {e}")
-                raise RuntimeError(f"Failed to fetch block timestamp for block {mid_block_number}.") from e
-            
-            if mid_block_timestamp > target_timestamp:
-                start_block_number = mid_block_number - 1
-            else:
-                end_block_number = mid_block_number + 1
-        
-        try:
-            final_block_timestamp = self.api.get_block_timestamp(hex(start_block_number))
-            logger.debug(f"Final check for block number: {start_block_number}, Timestamp: {final_block_timestamp}")
+        initial_block_number = self._binary_search_block_for_timestamp(
+            start_block_number,
+            end_block_number,
+            target_timestamp
+        )
 
-        except Exception as e:
-            logger.error(f"Error fetching final block timestamp for block {start_block_number}: {e}")
-            raise RuntimeError(f"Failed to fetch final block timestamp for block {start_block_number}.") from e
-        
-        if final_block_timestamp < target_timestamp:
-            start_block_number += 1
-        
-        logger.info(f"First block on {target_date} is {start_block_number}")
-        return start_block_number
-  
+        first_block_number = self._find_final_block(initial_block_number, target_timestamp, block_type='first')
 
-    def get_timestamp_of_last_block_on_target_date(self, target_date):   
+        logger.debug(f"First block on {target_date} is {first_block_number}")
+
+        return first_block_number
+
+
+    def get_timestamp_of_last_block_on_target_date(self, target_date: str) -> int:
         """
         Finds the block number of the last block mined on the specified target date.
 
@@ -600,137 +613,172 @@ class BlockTimestampFinder:
         -------
         int
             The block number of the last block on the target date.
-
-        Raises
-        ------
-        ValueError
-            If the date format is invalid.
-        RuntimeError
-            If there is an error initializing the search or fetching the block timestamp.
         """
-        if not self._validate_date(target_date):
-            logger.error(f"Invalid target date format: {target_date}")
-            raise ValueError("Date must be in the format YYYY-MM-DD")
-
         logger.info(f"Starting search for the last block on {target_date}")
 
-        try:
-            next_day = datetime.strptime(target_date, "%Y-%m-%d") + timedelta(days=1)
-            target_timestamp = int(next_day.replace(tzinfo=timezone.utc).timestamp())
-            latest_block_number = self.api.get_latest_block_number()
+        self._validate_date(target_date)
 
-        except Exception as e:
-            logger.error(f"Error initializing search: {e}")
-            raise RuntimeError("Failed to initialize the search for the last block timestamp.") from e
+        target_timestamp = self._get_target_timestamp(target_date, next_day=True)
+
+        latest_block_number = self.ether_api.get_latest_block_number()
 
         start_block_number = latest_block_number
         end_block_number = 0
 
-        while start_block_number > end_block_number:
-            mid_block_number = (start_block_number + end_block_number) // 2
+        initial_block_number = self._binary_search_block_for_timestamp(
+            start_block_number,
+            end_block_number,
+            target_timestamp,
+        )
 
-            try:
-                mid_block_timestamp = self.api.get_block_timestamp(hex(mid_block_number))
-                logger.debug(f"Checking block number: {mid_block_number}, Timestamp: {mid_block_timestamp}")
+        last_block_number = self._find_final_block(initial_block_number, target_timestamp, block_type='last')
 
-            except Exception as e:
-                logger.error(f"Error fetching block timestamp for block {mid_block_number}: {e}")
-                raise RuntimeError(f"Failed to fetch block timestamp for block {mid_block_number}.") from e
-
-            if mid_block_timestamp >= target_timestamp:
-                start_block_number = mid_block_number - 1
-            else:
-                end_block_number = mid_block_number + 1
-
-        try:
-            final_block_timestamp = self.api.get_block_timestamp(hex(start_block_number))
-            logger.debug(f"Final check for block number: {start_block_number}, Timestamp: {final_block_timestamp}")
-
-        except Exception as e:
-            logger.error(f"Error fetching final block timestamp for block {start_block_number}: {e}")
-            raise RuntimeError(f"Failed to fetch final block timestamp for block {start_block_number}.") from e
-
-        if final_block_timestamp >= target_timestamp:
-            start_block_number -= 1
-
-        logger.info(f"Last block on {target_date} is {start_block_number}")
-        return start_block_number
-        
-@ErrorHandler.ehdc()
-class BlockDownloader:
-    """
-    A class to download a single block data from an API and save it to JSON files.
-
-    Parameters
-    ----------
-    api : object
-        An API object that implements methods to fetch block timestamps and transactions.
-    file_manager : object
-        A file manager object that implements a method for saving data to JSON files.
-
-    Methods
-    -------
-    download_single_block
-    """
-    def __init__(self, api, file_manager):
-        self.api = api
-        self.file_manager = file_manager
+        logger.info(f"Last block on {target_date} is {last_block_number}")
+        return last_block_number
 
 
-    def download_single_block(self, block_number, fetched_block_numbers):        
+    def _binary_search_block_for_timestamp(self, start_block: int, end_block: int,
+                                           target_timestamp: int) -> int:
         """
-        Downloads data for a single block from the API and saves it to a JSON file.
-
-        If the block has already been fetched, it is skipped. Fetches both the timestamp and transactions for the block,
-        and in case of errors, logs the failure and exits. On success, saves the block data to a file and updates the
-        list of fetched blocks.
+        Performs binary search to find the block number based on the target timestamp.
 
         Parameters
         ----------
-        block_number : int
-            The number of the block for which data is to be fetched.
-        fetched_block_numbers : list of int
-            A list of block numbers that have already been fetched. The block with `block_number` will be skipped if it is in this list.
+        start_block : int
+            The starting block number for the search.
+        end_block : int
+            The ending block number for the search.
+        target_timestamp : int
+            The target timestamp to compare against.
 
         Returns
         -------
-        None
-            This method does not return any value.
+        int
+            The block number that matches the target timestamp criteria.
+        """
+        logger.debug(
+            f"Starting binary search between blocks {start_block} and {end_block} for timestamp {target_timestamp}")
+
+        iterations = 0
+        while start_block > end_block and iterations < self.max_iterations:
+            iterations += 1
+            mid_block_number = (start_block + end_block) // 2
+            mid_block_timestamp = self.ether_api.get_block_timestamp(mid_block_number)
+            logger.debug(f"Checking block number: {mid_block_number}, Timestamp: {mid_block_timestamp}")
+
+            if mid_block_timestamp >= target_timestamp:
+                start_block = mid_block_number - 1
+            else:
+                end_block = mid_block_number + 1
+
+        logger.debug(f"Binary search complete. Closest block number: {start_block}")
+        return start_block
+
+
+    @staticmethod
+    def _validate_date(date_str: str) -> None:
+        """
+        Validates if the input string is a valid date in the format YYYY-MM-DD
+        and checks if the date is not in the future.
+
+        Parameters
+        ----------
+        date_str : str
+            The date string to validate.
 
         Raises
         ------
-        Exception
-            If an error occurs during the fetching of block timestamp or transactions, or while saving data to a file.   
+        ValueError
+            If the date format is incorrect or if the date is in the future.
         """
-        logger.info(f"Downloading single block: {block_number}")
-
-        if block_number in fetched_block_numbers:
-            logger.info(f"Block {block_number} already fetched. Skipping...")
-            return
+        logger.debug(f"Validating date: {date_str}")
 
         try:
-            timestamp = self.api.get_block_timestamp(hex(block_number))     
-            transactions = self.api.get_block_transactions(hex(block_number))
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
-        except Exception as e:
-            logger.error(f"Error fetching data for block {block_number}: {str(e)}")
-            return
+        except ValueError:
+            raise ValueError("Invalid date format! Date must be in the format YYYY-MM-DD.")
 
-        block_data = {
-            "block_number": block_number,
-            "timestamp": timestamp,
-            "transactions": transactions
-        }
+        current_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
-        file_path = f"block_{block_number}.json"
-        
-        try:
-            self.file_manager.save_to_json(block_data, file_path)
-            logger.info(f"Block {block_number} saved to {file_path}")
-            fetched_block_numbers.append(block_number)
+        if target_date > current_date:
+            raise ValueError(f"Cannot search for blocks on a future date: {date_str}")
 
-        except Exception as e:
-            logger.error(f"Error saving block {block_number} data to file: {str(e)}")
+        logger.debug(f"Successfully validated date: {date_str}")
+
+
+    @staticmethod
+    def _get_target_timestamp(target_date: str, next_day: bool = False) -> int:
+        """
+        Converts a date string to a Unix timestamp. Optionally calculates the timestamp for the next day.
+
+        Parameters
+        ----------
+        target_date : str
+            The target date in the format YYYY-MM-DD.
+        next_day : bool, optional
+            If True, calculates the timestamp for the next day (default is False).
+
+        Returns
+        -------
+        int
+            The Unix timestamp corresponding to the target date or the next day if `next_day` is True.
+        """
+        logger.debug(f"Converting target date {target_date} to timestamp.")
+
+        if next_day:
+            next_day = datetime.strptime(target_date, "%Y-%m-%d") + timedelta(days=1)
+            target_timestamp = int(next_day.replace(tzinfo=timezone.utc).timestamp())
+        else:
+            target_timestamp = int(datetime.strptime(target_date + " 00:00", "%Y-%m-%d %H:%M")
+                                   .replace(tzinfo=timezone.utc).timestamp())
+
+        day_type = "next day's" if next_day else "today's"
+        logger.debug(f"Converted {target_date} to {day_type} timestamp.")
+
+        return target_timestamp
+
+
+    def _find_final_block(self, start_block: int, target_timestamp: int, block_type: str) -> int:
+        """
+        Finds the final block based on timestamp conditions for either the first or last block.
+
+        Parameters
+        ----------
+        start_block : int
+            Initially found block number.
+        target_timestamp : int
+            Target timestamp to compare against.
+        block_type : str
+            Type of block: 'first' for the first block, 'last' for the last block.
+
+        Returns
+        -------
+        int
+            Adjusted block number based on timestamp comparison.
+        """
+        logger.debug(f"Checking block for {block_type} block.")
+
+        found_block_timestamp = self.ether_api.get_block_timestamp(start_block)
+
+        if block_type == 'first':
+            if found_block_timestamp < target_timestamp:
+                start_block += 1
+                logger.debug(f"First block adjusted to {start_block}.")
+            else:
+                logger.debug(f"First block is fine, no adjustment needed.")
+
+        elif block_type == 'last':
+            if found_block_timestamp >= target_timestamp:
+                start_block -= 1
+                logger.debug(f"Last block adjusted to {start_block}.")
+            else:
+                logger.debug(f"Last block is fine, no adjustment needed.")
+        else:
+            raise ValueError(f"Unknown block type: {block_type}")
+
+        return start_block
+
 
 @ErrorHandler.ehdc()
 class BlockProcessor:
@@ -739,7 +787,7 @@ class BlockProcessor:
 
     Attributes
     ----------
-    api : object
+    ether_api : EtherAPI
         API interface used to fetch block data.
     file_manager : object
         File manager used to save block data.
@@ -750,19 +798,19 @@ class BlockProcessor:
     -------
     process_block
     """
-    def __init__(self, api, file_manager, config): 
-        self.api = api
+    def __init__(self, ether_api, file_manager, config):
+        self.ether_api = ether_api
         self.file_manager = file_manager
         self.config = config
 
+
     def process_block(self, block_number, fetched_block_numbers, interrupt_flag=None):
         """
-        Processes a block by fetching its number, timestamp and transactions, validating the data,
-        saving the block data to a file, and updating the list of fetched blocks. The function also respects
-        the configured request delay to avoid overloading the API.
+        Processes a block by fetching it's number, timestamp and transactions, validating the data,
+        saving the block data to a file, and updating the list of fetched blocks.
 
         The operation can be interrupted based on the `interrupt_flag`. If the `interrupt_flag` is set and 
-        its value is True, the processing will be halted, and the function will return early.
+        its value is True, the processing will be stopped, and the function will return early.
 
         Parameters
         ----------
@@ -770,7 +818,7 @@ class BlockProcessor:
             The number of the block to process.        
 
         fetched_block_numbers : list
-            List of block numbers that have already been processed.
+            A list of block numbers that have already been processed.
 
         interrupt_flag : multiprocessing.Value, optional
             Flag to signal interruption of processing.
@@ -810,12 +858,12 @@ class BlockProcessor:
             return None, 1
 
         try:
-            timestamp = self.api.get_block_timestamp(hex(block_number))            
+            timestamp = self.ether_api.get_block_timestamp(block_number)
             if not isinstance(timestamp, int) or timestamp <= 0:
                 logger.error(f"Invalid timestamp for block: {block_number}")
                 raise ValueError(f"Invalid timestamp for block: {block_number}")           
 
-            transactions = self.api.get_block_transactions(hex(block_number))
+            transactions = self.ether_api.get_block_transactions(block_number)
             if not all(isinstance(tx, dict) and 'hash' in tx for tx in transactions):
                 logger.error(f"Invalid transactions for block: {block_number}")
                 raise ValueError(f"Invalid transactions for block: {block_number}")
@@ -827,8 +875,7 @@ class BlockProcessor:
             }
             
             self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
-            logger.info(f"Block {block_number} saved to block_{block_number}.json")           
-            # time.sleep(self.config.REQUEST_DELAY)                     
+            logger.info(f"Block {block_number} saved to block_{block_number}.json")
 
             return block_number, 1   
 
@@ -840,8 +887,7 @@ class BlockProcessor:
             logger.error(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
             raise RuntimeError(f"Error while processing block {block_number}") from e
 
-        return None, 0
-    
+
 @ErrorHandler.ehdc()
 class MultiProcessor:
     """
@@ -1051,14 +1097,6 @@ class MainBlockProcessor:
     ----------
     config : Config
         The configuration object.
-    api : EtherAPI
-        Instance of EtherAPI for interacting with the blockchain.
-    file_manager : FileManager
-        Instance of FileManager for handling file operations.
-    block_downloader : BlockDownloader
-        Instance of BlockDownloader for downloading blocks.
-    block_processor : BlockProcessor
-        Instance of BlockProcessor for processing blocks.
 
     Methods
     -------
@@ -1069,10 +1107,10 @@ class MainBlockProcessor:
     """    
     def __init__(self, config):
         self.config = config
-        self.api = EtherAPI(self.config)
+        self.ether_api = EtherAPI(self.config)
         self.file_manager = FileManager(self.config)
-        self.block_downloader = BlockDownloader(self.api, self.file_manager)
-        self.block_processor = BlockProcessor(self.api, self.file_manager, self.config)
+        self.block_downloader = BlockDownloader(self.ether_api, self.file_manager, self.config)
+        self.block_processor = BlockProcessor(self.ether_api, self.file_manager, self.config)
     
     def get_target_block_numbers(self, block_numbers_or_num_blocks):
         """
@@ -1093,19 +1131,18 @@ class MainBlockProcessor:
         ------
         ValueError
             If input is neither a list nor an integer.
+
         RuntimeError
             If an error occurs while fetching the target block numbers.
         """
         try:
-            
-            
 
             if isinstance(block_numbers_or_num_blocks, list):
                 logger.debug(f"MainBlockProcessor: Received list of block numbers")
                 return block_numbers_or_num_blocks
 
             elif isinstance(block_numbers_or_num_blocks, int):
-                latest_block_number = self.api.get_latest_block_number()
+                latest_block_number = self.ether_api.get_latest_block_number()
                 logger.debug(f"MainBlockProcessor: Fetched latest block number")
                 target_blocks = list(
                     range(
@@ -1127,7 +1164,7 @@ class MainBlockProcessor:
         except Exception as e:
             logger.error(f"MainBlockProcessor: Failed to get target block numbers: {str(e)}")
             raise RuntimeError(f"MainBlockProcessor: Failed to get target block numbers: {str(e)}") from e
-    
+
     def process_blocks(self, target_block_numbers, progress_callback=None, check_interrupt=None):       
         """
         Processes blocks based on target block numbers.
@@ -1135,7 +1172,7 @@ class MainBlockProcessor:
         Parameters
         ----------
         target_block_numbers : list
-            List of target block numbers to process.
+            A List of target block numbers to process.
         progress_callback : callable, optional
             A callback function to report progress (default is None).
         check_interrupt : callable, optional
@@ -1175,6 +1212,7 @@ class MainBlockProcessor:
             logger.error(f"MainBlockProcessor: Error during block processing: {str(e)}")
             raise RuntimeError(f"MainBlockProcessor: Error during block processing: {str(e)}") from e        
 
+
     def handle_missing_blocks(self, target_block_numbers, fetched_block_numbers):
         """
         Handles the downloading of missing blocks.
@@ -1182,9 +1220,9 @@ class MainBlockProcessor:
         Parameters
         ----------
         target_block_numbers : list
-            List of target block numbers to check.
+            A List of target block numbers to check.
         fetched_block_numbers : list
-            List of block numbers that have already been fetched.
+            A List of block numbers that have already been fetched.
 
         Returns
         -------
@@ -1239,16 +1277,13 @@ if __name__ == "__main__":
         Run the script directly to start the block processing procedure, mainly for testing.
     """    
     start_time = time.time()
-    config = Config()
-    file_manager = FileManager(config)
-
-    main_block_processor = MainBlockProcessor(config)
+    config_instance = Config()
+    main_block_processor = MainBlockProcessor(config_instance)
     block_input = BlockInput()
-    # block_numbers_or_num_blocks = BlockInput.get_num_blocks_to_fetch()
 
     main_block_processor.run(
         block_input.get_num_blocks_to_fetch(),
-        progress_callback=lambda total, current: print(f"Postęp: {current}/{total}"),
+        progress_callback=lambda total, current: print(f"Progress: {current}/{total}"),
         check_interrupt=lambda: False
     )
     end_time = time.time()

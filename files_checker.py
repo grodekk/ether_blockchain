@@ -1,24 +1,24 @@
 import os
-import sqlite3
 import json
 from config import Config 
 from database_tool import DatabaseManager
 from logger import logger
-from error_handler import CustomProcessingError as cpe
+from error_handler import ErrorHandler
 
-@cpe.ehdc()
+
+@ErrorHandler.ehdc()
 class FilesChecker:
     def __init__(self, config, database_manager):
         self.config = config
         self.database_manager = database_manager
-    
-    
+
+
     def ensure_directory(self, path):
         if not os.path.exists(path):
             os.makedirs(path)
             logger.info(f'Directory "{path}" was successfully created.')
 
-    
+
     def ensure_file(self, path, initializer=None):
         if not os.path.exists(path):
             with open(path, 'w') as f:
@@ -26,7 +26,7 @@ class FilesChecker:
                     initializer()
             logger.info(f'File "{path}" was successfully created.')
 
-    
+
     def initialize_wallets_activity(self):
         with open(self.config.WALLETS_ACTIVITY_FILENAME, 'w') as json_file:
             json.dump({}, json_file)
@@ -82,10 +82,17 @@ class FilesChecker:
 
         logger.info("All files and directories are checked!")
 
-    
+
+class FilesCheckerFactory:
+    @staticmethod
+    def create_files_checker(config):
+        database_manager = DatabaseManager(config.DB_FILENAME)
+        files_checker_instance = FilesChecker(config, database_manager)
+        return files_checker_instance
+
+
 if __name__ == "__main__":
     input_file_name = "2024-10-02_daily_data.json"
-    config = Config()
-    database_manager = DatabaseManager(config.DB_FILENAME)
-    files_checker = FilesChecker(config, database_manager)
+    config_instance = Config()
+    files_checker = FilesCheckerFactory.create_files_checker(config_instance)
     files_checker.check_files()

@@ -4,21 +4,16 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from charts import ChartHandler, chart_config
 from functools import partial
-import mplcursors
 from PyQt5.QtGui import QCursor, QPixmap
 from PyQt5.Qt import Qt
-from PyQt5.QtCore import QTimer, QObject, QPropertyAnimation, QEasingCurve, QRect, pyqtProperty, pyqtSlot, QMutex, QMutexLocker
-from PyQt5.QtWidgets import QDateEdit, QInputDialog, QCalendarWidget, QDialog, QMessageBox, QLineEdit
-from PyQt5.QtCore import QDate, pyqtSignal, QThread, QMetaObject 
-from database_tool import check_date_in_database
+from PyQt5.QtCore import QTimer, QObject, QPropertyAnimation, QEasingCurve, QRect, pyqtProperty, pyqtSlot, QMutex
+from PyQt5.QtWidgets import QDateEdit, QCalendarWidget, QDialog, QMessageBox
+from PyQt5.QtCore import QDate, pyqtSignal, QThread,
 import blocks_download
-import blocks_extractor
-import wallets_update
-from wallets_update import save_top_wallets_info
 import database_tool
 from datetime import datetime
 import blocks_remover
-import time
+
 
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), "baza_danych.db")
 BLOCKS_DATA_PATH = os.path.join(os.path.dirname(__file__), "blocks_data")
@@ -670,10 +665,12 @@ class EthereumDataApp(QMainWindow):
 
 
     def get_blocks_count(self):
-        num_blocks, ok_pressed = blocks_download.BlockInput.get_num_blocks_to_fetch(method="interface")
+        block_input = blocks_download.BlockInput(method='interface')
+        # num_blocks, ok_pressed = blocks_download.BlockInput.get_num_blocks_to_fetch(method="interface")
+        num_blocks = block_input.get_num_blocks_to_fetch()
         main_app = blocks_download.MainBlockProcessor(blocks_download.Config())
 
-        if ok_pressed:
+        if num_blocks:
             print(f"Liczba bloków do pobrania: {num_blocks}")            
             self.execute_task(main_app.run, num_blocks)
         else:
