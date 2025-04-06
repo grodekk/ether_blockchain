@@ -486,9 +486,10 @@ class BlockDownloader:
         A file manager object that implements a method for saving data to JSON files.
     """
 
-    def __init__(self, ether_api: EtherAPI, file_manager: FileManager) -> None:
+    def __init__(self, ether_api: EtherAPI, file_manager: FileManager, config: Config) -> None:
         self.ether_api = ether_api
         self.file_manager = file_manager
+        self.config = config
 
 
     def download_single_block(self, block_number: int, fetched_block_numbers: list) -> None:
@@ -577,7 +578,7 @@ class BlockTimestampFinder:
         int
             The block number of the first block on the given date.
         """
-        logger.debug(f"Starting search for the first block on {target_date}")
+        logger.info(f"Starting search for the first block on {target_date}")
 
         self._validate_date(target_date)
 
@@ -805,7 +806,7 @@ class BlockProcessor:
 
     def process_block(self, block_number, fetched_block_numbers, interrupt_flag=None):
         """
-        Processes a block by fetching its number, timestamp and transactions, validating the data,
+        Processes a block by fetching it's number, timestamp and transactions, validating the data,
         saving the block data to a file, and updating the list of fetched blocks.
 
         The operation can be interrupted based on the `interrupt_flag`. If the `interrupt_flag` is set and 
@@ -817,7 +818,7 @@ class BlockProcessor:
             The number of the block to process.        
 
         fetched_block_numbers : list
-            List of block numbers that have already been processed.
+            A list of block numbers that have already been processed.
 
         interrupt_flag : multiprocessing.Value, optional
             Flag to signal interruption of processing.
@@ -857,12 +858,12 @@ class BlockProcessor:
             return None, 1
 
         try:
-            timestamp = self.api.get_block_timestamp(hex(block_number))            
+            timestamp = self.ether_api.get_block_timestamp(block_number)
             if not isinstance(timestamp, int) or timestamp <= 0:
                 logger.error(f"Invalid timestamp for block: {block_number}")
                 raise ValueError(f"Invalid timestamp for block: {block_number}")           
 
-            transactions = self.api.get_block_transactions(hex(block_number))
+            transactions = self.ether_api.get_block_transactions(block_number)
             if not all(isinstance(tx, dict) and 'hash' in tx for tx in transactions):
                 logger.error(f"Invalid transactions for block: {block_number}")
                 raise ValueError(f"Invalid transactions for block: {block_number}")
@@ -886,8 +887,7 @@ class BlockProcessor:
             logger.error(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
             raise RuntimeError(f"Error while processing block {block_number}") from e
 
-        return None, 0
-    
+
 @ErrorHandler.ehdc()
 class MultiProcessor:
     """
@@ -1107,10 +1107,10 @@ class MainBlockProcessor:
     """    
     def __init__(self, config):
         self.config = config
-        self.api = EtherAPI(self.config)
+        self.ether_api = EtherAPI(self.config)
         self.file_manager = FileManager(self.config)
-        self.block_downloader = BlockDownloader(self.api, self.file_manager)
-        self.block_processor = BlockProcessor(self.api, self.file_manager, self.config)
+        self.block_downloader = BlockDownloader(self.ether_api, self.file_manager, self.config)
+        self.block_processor = BlockProcessor(self.ether_api, self.file_manager, self.config)
     
     def get_target_block_numbers(self, block_numbers_or_num_blocks):
         """
@@ -1142,7 +1142,7 @@ class MainBlockProcessor:
                 return block_numbers_or_num_blocks
 
             elif isinstance(block_numbers_or_num_blocks, int):
-                latest_block_number = self.api.get_latest_block_number()
+                latest_block_number = self.ether_api.get_latest_block_number()
                 logger.debug(f"MainBlockProcessor: Fetched latest block number")
                 target_blocks = list(
                     range(

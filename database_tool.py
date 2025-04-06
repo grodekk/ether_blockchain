@@ -133,8 +133,8 @@ class BiggestWalletsData:
                     if isinstance(wallet_info, dict):
                         balance_history = wallet_info.get('balance_history', [])
 
-                        top_buy_transaction = wallet_info.get('top_buy_transaction', {})
-                        top_sell_transaction = wallet_info.get('top_sell_transaction', {})
+                        top_buy_transaction = wallet_info.get('top_buy_transaction') or {}
+                        top_sell_transaction = wallet_info.get('top_sell_transaction') or {}
 
                         top_buy_amount = top_buy_transaction.get('amount')
                         top_buy_date_str = top_buy_transaction.get('date')
@@ -171,6 +171,8 @@ class BiggestWalletsData:
                                 print(f"Entry for wallet {wallet_address}, date {date}, "
                                       f"and balance {balance} already exists.")
                             else:
+                                print(f"New Entry for wallet {wallet_address}, date {date}, "
+                                      f"and balance {balance}.")
                                 db.execute_query('''
                                     INSERT OR REPLACE INTO wallet_balance (
                                         wallet_address, date, balance,
@@ -301,16 +303,6 @@ if __name__ == "__main__":
     """
     mainly for testing    
     """
-    config = Config()
-    db_filename = config.DB_FILENAME
-    database_manager = DatabaseManager(db_filename)
-    data_reader = DataReader(database_manager)
-    data_display = DataDisplay(database_manager)
-    data_checker = DataChecker(database_manager)    
-    data_calculator = DataCalculator(database_manager)
-    data_importer = DataImporter(config, database_manager, data_calculator)
-    data_cleaner = DataCleaner(database_manager)
-    data_type =  "daily"
-    input_file_name = "2024-10-02_daily_data.json"
-
-    data_display.print_combined_data_by_type(data_type="daily")
+    db_components = DatabaseFactory.create_database_components()
+    data_type = "daily"
+    db_components["data_display"].print_combined_data_by_type(data_type)

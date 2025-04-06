@@ -109,7 +109,7 @@ class WalletInfoManager:
 @ErrorHandler.ehdc()
 class WalletUpdaterFactory:
     @staticmethod
-    def create_wallets_updater(config):
+    def create_wallets_updater():
         config = Config()
         updater = WalletInfoUpdater()
         manager = WalletInfoManager(config, updater)
@@ -118,10 +118,8 @@ class WalletUpdaterFactory:
 
 if __name__ == "__main__":
     """
-    mainly for testing    
+    Mainly for testing    
     """
-    input_file_name = "2024-10-02_daily_data.json"    
-    config = Config()    
-    updater = WalletInfoUpdater()
-    manager = WalletInfoManager(config, updater)
+    input_file_name = "2024-10-02_daily_data.json"
+    manager = WalletUpdaterFactory.create_wallets_updater()
     manager.save_top_wallets_info(input_file_name)

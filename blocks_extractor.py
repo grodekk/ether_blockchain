@@ -663,7 +663,7 @@ class ExtractorFactory:
         config = Config()
         api = EtherAPI(config)
         file_manager = FileManager(config)
-        block_downloader = BlockDownloader(api, file_manager)
+        block_downloader = BlockDownloader(api, file_manager, config)
         block_file_processor = BlockFileProcessor(block_downloader, file_manager)
         transactions_grouper = TransactionsGrouper(block_file_processor, config)
         transaction_processor = TransactionProcessor()
@@ -706,7 +706,7 @@ if __name__ == "__main__":
     print("2: Daily data extraction")
 
     choice = input("Choose an option (1/2): ")
-    extract_date_target = "2024-12-24 00:00:00"
+    extract_date_target = "2025-04-03 00:00:00"
 
     if choice == '1':
         hourly_extractor = ExtractorFactory.create_extractor('hourly')
