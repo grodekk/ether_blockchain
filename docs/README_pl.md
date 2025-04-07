@@ -148,4 +148,4 @@ Projekt był wspierany przez narzędzia AI, w tym ChatGPT, który pomógł w gen
 
 ## Licencja
 
-Ten projekt jest objęty licencją MIT. Szczegóły znajdują się w pliku [LICENSE](LICENSE.txt).
+Ten projekt jest objęty licencją MIT. Szczegóły znajdują się w pliku [LICENSE](LICENSE).
