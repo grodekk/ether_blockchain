@@ -1,0 +1,20 @@
+MIT License
+
+Copyright (c) 2025 Tomasz Grodecki
+
+Pozwalam każdemu uzyskać, używać, kopiować, modyfikować, scalać, publikować,
+dystrybuować, udostępniać i/lub sprzedawać kopie Oprogramowania, a także
+umożliwiać osobom, którym Oprogramowanie jest dostarczane, to robić, z
+zachowaniem poniższego warunku:
+
+Wszystkie kopie lub istotne fragmenty Oprogramowania muszą zawierać powyższe
+informacje o prawach autorskich oraz ten warunek licencyjny.
+
+Oprogramowanie jest dostarczane "tak jak jest", bez żadnej gwarancji, wyraźnej
+ani dorozumianej, w tym między innymi gwarancji przydatności handlowej i
+przydatności do określonego celu. W żadnym przypadku autorzy ani właściciele
+praw autorskich nie ponoszą odpowiedzialności za jakiekolwiek roszczenia, szkody
+lub inne odpowiedzialności, wynikłe z, w wyniku, lub w związku z Oprogramowaniem
+lub korzystaniem z niego.
+
+W projekcie wykorzystano narzędzia AI, takie jak ChatGPT, które pomogły w tworzeniu kodu i dokumentacji.

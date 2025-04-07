@@ -1,0 +1,7 @@
+schedule
+requests
+PyQt5
+matplotlib
+mplcursors
+python-dotenv
+pytest
