@@ -1,6 +1,6 @@
 # Ethereum Blockchain Analysis App
 
-![GitHub](https://img.shields.io/github/license/grodekk/ether_blockchain)
+![GitHub](https://img.shields.io/github/grodekk/ether_blockchain/licence)
 ![Python Version](https://img.shields.io/badge/python-3.x-blue)
 
 Aplikacja służąca do kompleksowego pobierania, przetwarzania i analizowania danych z blockchaina Ethereum.  
