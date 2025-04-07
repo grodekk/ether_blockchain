@@ -2,19 +2,20 @@ MIT License
 
 Copyright (c) 2025 Tomasz Grodecki
 
-Pozwalam każdemu uzyskać, używać, kopiować, modyfikować, scalać, publikować,
-dystrybuować, udostępniać i/lub sprzedawać kopie Oprogramowania, a także
-umożliwiać osobom, którym Oprogramowanie jest dostarczane, to robić, z
-zachowaniem poniższego warunku:
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Wszystkie kopie lub istotne fragmenty Oprogramowania muszą zawierać powyższe
-informacje o prawach autorskich oraz ten warunek licencyjny.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Oprogramowanie jest dostarczane "tak jak jest", bez żadnej gwarancji, wyraźnej
-ani dorozumianej, w tym między innymi gwarancji przydatności handlowej i
-przydatności do określonego celu. W żadnym przypadku autorzy ani właściciele
-praw autorskich nie ponoszą odpowiedzialności za jakiekolwiek roszczenia, szkody
-lub inne odpowiedzialności, wynikłe z, w wyniku, lub w związku z Oprogramowaniem
-lub korzystaniem z niego.
-
-W projekcie wykorzystano narzędzia AI, takie jak ChatGPT, które pomogły w tworzeniu kodu i dokumentacji.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
