@@ -363,73 +363,48 @@ class EtherAPI:
 class FileManager:
     """
     A class to manage JSON file operations including saving and loading data.
-
-    Attributes
-    ----------
-    config : Config
-        Configuration object containing settings including file paths.
     """
-    def __init__(self, config: Config) -> None:
-        self.config = config
 
-
-    def save_to_json(self, data: dict | list, filename: str) -> None:
+    @staticmethod
+    def save_to_json(data: dict | list, file_path: str) -> None:
         """
-        Save the provided data to a JSON file at the location specified by the filename.
+        Save the provided data to a JSON file at the specified file path.
 
         Parameters
         ----------
         data : dict or list
             The data to be saved in JSON format.
-        filename : str
-            The name of the file where data will be saved.
+        file_path : str
+            The full path where data will be saved.
         """
-        file_path = self._get_file_path(filename)
         Utils.check_empty_result(data, "data to save")
 
         with open(file_path, 'w') as json_file:
-            json.dump(data, json_file, indent=4) #type: ignore
+            json.dump(data, json_file, indent=4)  # type: ignore
 
-        logger.debug(f"Block data saved to JSON file: {file_path}")
+        logger.debug(f"Data saved to JSON file: {file_path}")
 
 
-    def load_from_json(self, filename: str) -> dict | list:
+    @staticmethod
+    def load_from_json(file_path: str) -> dict | list:
         """
-        Load data from a JSON file at the location specified by the path and filename.
+        Load data from a JSON file at the specified file path.
 
         Parameters
         ----------
-        filename : str
-            The name of the file to load data from.
+        file_path : str
+            The full path to the JSON file.
 
         Returns
         -------
         dict or list
             The data loaded from the JSON file.
         """
-        file_path = self._get_file_path(filename)
         with open(file_path, 'r') as file:
             data = json.load(file)
 
         logger.debug(f"Data loaded from JSON file: {file_path}")
         return data
-
-
-    def _get_file_path(self, filename: str) -> str:
-        """
-        Construct the full file path for the given filename using the config object.
-
-        Parameters
-        ----------
-        filename : str
-            The name of the file.
-
-        Returns
-        -------
-        str
-            The full path to the file.
-        """
-        return os.path.join(self.config.BLOCKS_DATA_DIR, filename)
 
 
     @staticmethod
@@ -454,6 +429,24 @@ class FileManager:
 class Utils:
 
     @staticmethod
+    def check_fetched_blocks(block_number: int, fetched_block_numbers: list) -> bool:
+        if block_number in fetched_block_numbers:
+            logger.debug(f"Block {block_number} already fetched. Skipping...")
+            return True
+        return False
+
+    @staticmethod
+    def check_interrupt_flag(interrupt_flag, data, data_type) -> (None,int):
+        if interrupt_flag and interrupt_flag.value:
+            logger.info(f"Processing interrupted for {data_type}: {data}")
+            return None, 0
+
+    @staticmethod
+    def check_is_negative(result: int) -> None:
+        if result < 0:
+                raise ValueError(f"Negative value for {result}.")
+
+    @staticmethod
     def check_empty_result(result: Any, data_type: str) -> None:
         if not result:
                 raise ValueError(f"Empty {data_type}.")
@@ -471,83 +464,6 @@ class Utils:
         if not isinstance(data, expected_type):
             raise ValueError(f"Invalid {data_name}"
                              f" format: Expected {expected_type.__name__}, got {type(data).__name__}.")
-
-
-@ErrorHandler.ehdc()
-class BlockDownloader:
-    """
-    A class to download a single block data from an API and save it to JSON files.
-
-    Parameters
-    ----------
-    ether_api : EtherAPI
-        An API object that implements methods to fetch block timestamps and transactions.
-    file_manager : FileManager
-        A file manager object that implements a method for saving data to JSON files.
-    """
-
-    def __init__(self, ether_api: EtherAPI, file_manager: FileManager, config: Config) -> None:
-        self.ether_api = ether_api
-        self.file_manager = file_manager
-        self.config = config
-
-
-    def download_single_block(self, block_number: int, fetched_block_numbers: list) -> None:
-        """
-        Downloads data for a single block from the API and saves it to a JSON file.
-
-        Parameters
-        ----------
-        block_number : int
-            The number of the block for which data is to be fetched.
-        fetched_block_numbers : list of int
-            A list of block numbers that have already been fetched.
-            The block with `block_number` will be skipped if it is in this list.
-
-        Returns
-        -------
-        None
-            This method does not return any value.
-
-        Raises
-        ------
-        Exception
-            If an error occurs during the fetching of block timestamp or transactions, or while saving data to a file.
-        """
-        logger.debug(f"Downloading single block: {block_number}")
-
-        if self.check_fetched_blocks(block_number, fetched_block_numbers):
-            return
-
-        try:
-            timestamp = self.ether_api.get_block_timestamp(block_number)
-            transactions = self.ether_api.get_block_transactions(block_number)
-
-            block_data = {
-                "block_number": block_number,
-                "timestamp": timestamp,
-                "transactions": transactions
-            }
-
-            file_path = f"block_{block_number}.json"
-
-            self.file_manager.save_to_json(block_data, file_path)
-            fetched_block_numbers.append(block_number)
-            self.file_manager.save_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
-
-        except Exception:
-            logger.error(f"Error while downloading block {block_number}")
-            raise
-
-        logger.debug(f"Single block: {block_number} download successful")
-
-    @staticmethod
-    def check_fetched_blocks(block_number: int, fetched_block_numbers: list) -> bool:
-        if block_number in fetched_block_numbers:
-            logger.debug(f"Block {block_number} already fetched. Skipping...")
-            return True
-        return False
-
 
 @ErrorHandler.ehdc()
 class BlockTimestampFinder:
@@ -779,6 +695,133 @@ class BlockTimestampFinder:
 
         return start_block
 
+@ErrorHandler.ehdc()
+class BlockService:
+    """
+    Service class for blockchain block operations.
+
+    Attributes
+    ----------
+    ether_api : EtherAPI
+        API for fetching data from the blockchain.
+    """
+
+    def __init__(self, ether_api: EtherAPI):
+        self.ether_api = ether_api
+
+    def fetch_block_data(self, block_number: int) -> dict:
+        """
+        Fetches the data of a specified block from the Ethereum API.
+
+        Parameters
+        ----------
+        block_number : int
+            The number of the block to fetch.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the block data:
+            - block_number : int
+            - timestamp : int
+            - transactions : list
+        """
+        timestamp = self.ether_api.get_block_timestamp(block_number)
+        transactions = self.ether_api.get_block_transactions(block_number)
+
+        return {
+            "block_number": block_number,
+            "timestamp": timestamp,
+            "transactions": transactions
+        }
+
+    @staticmethod
+    def is_block_fetched(block_number: int, fetched_block_numbers: list) -> bool:
+        """
+        Checks if the block has already been fetched.
+
+        Parameters
+        ----------
+        block_number : int
+            The number of the block to check.
+        fetched_block_numbers : list
+            A list of block numbers that have already been fetched.
+
+        Returns
+        -------
+        bool
+            True if the block has already been fetched, False otherwise.
+        """
+        return Utils.check_fetched_blocks(block_number, fetched_block_numbers)
+
+
+@ErrorHandler.ehdc()
+class BlockDownloader:
+    """
+    A class to download a single block data from an API and save it to JSON files.
+
+    Parameters
+    ----------
+    ether_api : EtherAPI
+        An API object that implements methods to fetch block timestamps and transactions.
+    file_manager : FileManager
+        A file manager object that implements a method for saving data to JSON files.
+    config : Config
+        Configuration object containing settings.
+    block_service : BlockService
+        Service for common block operations.
+    """
+
+    def __init__(
+            self,
+            ether_api: EtherAPI,
+            file_manager: FileManager,
+            config: Config,
+            block_service: BlockService
+    )       -> None:
+
+        self.ether_api = ether_api
+        self.file_manager = file_manager
+        self.config = config
+        self.block_service = block_service
+
+    def download_single_block(self, block_number: int, fetched_block_numbers: list) -> None:
+        """
+        Downloads data for a single block from the API and saves it to a JSON file.
+
+        Parameters
+        ----------
+        block_number : int
+            The number of the block for which data is to be fetched.
+        fetched_block_numbers : list of int
+            A list of block numbers that have already been fetched.
+            The block with `block_number` will be skipped if it is in this list.
+
+        Returns
+        -------
+        None
+            This method does not return any value.
+
+        Raises
+        ------
+        Exception
+            If an error occurs during the fetching of block timestamp or transactions, or while saving data to a file.
+        """
+        logger.debug(f"Downloading single block: {block_number}")
+
+        if self.block_service.is_block_fetched(block_number, fetched_block_numbers):
+            return
+
+        block_data = self.block_service.fetch_block_data(block_number)
+
+        file_path = f"block_{block_number}.json"
+
+        self.file_manager.save_to_json(block_data, file_path)
+        fetched_block_numbers.append(block_number)
+        self.file_manager.save_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
+
+        logger.debug(f"Single block: {block_number} download successful")
+
 
 @ErrorHandler.ehdc()
 class BlockProcessor:
@@ -789,37 +832,35 @@ class BlockProcessor:
     ----------
     ether_api : EtherAPI
         API interface used to fetch block data.
-    file_manager : object
+    file_manager : FileManager
         File manager used to save block data.
-    config : object
+    config : Config
         Configuration object containing settings.
+    block_service : BlockService
+        Service for common block operations.
 
     Methods
     -------
     process_block
     """
-    def __init__(self, ether_api, file_manager, config):
+
+    def __init__(self, ether_api: EtherAPI, file_manager: FileManager, config: Config, block_service: BlockService):
         self.ether_api = ether_api
         self.file_manager = file_manager
         self.config = config
-
+        self.block_service = block_service
 
     def process_block(self, block_number, fetched_block_numbers, interrupt_flag=None):
         """
-        Processes a block by fetching it's number, timestamp and transactions, validating the data,
-        saving the block data to a file, and updating the list of fetched blocks.
-
-        The operation can be interrupted based on the `interrupt_flag`. If the `interrupt_flag` is set and 
-        its value is True, the processing will be stopped, and the function will return early.
+        Processes a blockchain block by fetching its data, validating, and saving it to a file.
+        The operation can be interrupted via the `interrupt_flag`. If the flag is set to True, processing stops early.
 
         Parameters
         ----------
         block_number : int
-            The number of the block to process.        
-
+            The number of the block to process.
         fetched_block_numbers : list
             A list of block numbers that have already been processed.
-
         interrupt_flag : multiprocessing.Value, optional
             Flag to signal interruption of processing.
 
@@ -827,65 +868,28 @@ class BlockProcessor:
         -------
         tuple
             A tuple containing:
-
             - block_number : int or None
                 The number of the processed block or None if processing was skipped or interrupted.
-
             - result : int
-                A result code indicating the status of the processing ( for update progress):
-                - 1: Success
-                - 0: Processing interrupted        
-        
-        Raises
-        ------
-        ValueError
-            If block number, timestamp, or transactions are invalid.
-        RuntimeError
-            For unexpected errors during processing.       
+                A result code indicating the status of the processing (for update progress):
+                - 1: Success / Block in fetched list
         """
-        if not isinstance(block_number, int) or block_number < 0:
-            logger.error(f"Invalid block number: {block_number}")
-            raise ValueError(f"Invalid block number: {block_number}")
+        Utils.check_interrupt_flag(interrupt_flag, block_number, "block_number")
+        Utils.check_type(block_number, int, "block_number")
+        Utils.check_is_negative(block_number)
 
-        if interrupt_flag and interrupt_flag.value:
-            logger.info(f"Processing interrupted for block: {block_number}")
-            return None, 0        
-            
         logger.info(f"Processing block: {block_number}")
-            
-        if block_number in fetched_block_numbers:
-            logger.info(f"Block {block_number} already fetched. Skipping...")
+
+        if self.block_service.is_block_fetched(block_number, fetched_block_numbers):
             return None, 1
 
-        try:
-            timestamp = self.ether_api.get_block_timestamp(block_number)
-            if not isinstance(timestamp, int) or timestamp <= 0:
-                logger.error(f"Invalid timestamp for block: {block_number}")
-                raise ValueError(f"Invalid timestamp for block: {block_number}")           
+        block_data = self.block_service.fetch_block_data(block_number)
 
-            transactions = self.ether_api.get_block_transactions(block_number)
-            if not all(isinstance(tx, dict) and 'hash' in tx for tx in transactions):
-                logger.error(f"Invalid transactions for block: {block_number}")
-                raise ValueError(f"Invalid transactions for block: {block_number}")
+        self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
 
-            block_data = {
-                "block_number": block_number,
-                "timestamp": timestamp,
-                "transactions": transactions
-            }
-            
-            self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
-            logger.info(f"Block {block_number} saved to block_{block_number}.json")
+        logger.info(f"Processing block: {block_number} finished")
 
-            return block_number, 1   
-
-        except ValueError as e:
-            logger.error(f"Validation error in process_block for block {block_number}: {str(e)}")
-            raise ValueError(f"Validation error for block {block_number}") from e
-
-        except Exception as e:
-            logger.error(f"Unexpected error occurred in process_block for block {block_number}: {str(e)}")
-            raise RuntimeError(f"Error while processing block {block_number}") from e
+        return block_number, 1
 
 
 @ErrorHandler.ehdc()
@@ -1108,9 +1112,10 @@ class MainBlockProcessor:
     def __init__(self, config):
         self.config = config
         self.ether_api = EtherAPI(self.config)
-        self.file_manager = FileManager(self.config)
-        self.block_downloader = BlockDownloader(self.ether_api, self.file_manager, self.config)
-        self.block_processor = BlockProcessor(self.ether_api, self.file_manager, self.config)
+        self.file_manager = FileManager()
+        self.block_service = BlockService(self.ether_api)
+        self.block_downloader = BlockDownloader(self.ether_api, self.file_manager, self.config, self.block_service)
+        self.block_processor = BlockProcessor(self.ether_api, self.file_manager, self.config, self.block_service)
     
     def get_target_block_numbers(self, block_numbers_or_num_blocks):
         """
