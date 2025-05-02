@@ -21,10 +21,28 @@ class FilesChecker:
 
     def ensure_file(self, path, initializer=None):
         if not os.path.exists(path):
-            with open(path, 'w') as f:
-                if initializer:
-                    initializer()
-            logger.info(f'File "{path}" was successfully created.')
+            if initializer:
+                initializer()
+        logger.info(f'File "{path}" was successfully created.')
+
+    def initialize_env_file(self):
+        with open(".env", "w") as f:
+            f.write(
+                "APP_BASE_DIR=\n"
+                "API_KEY=\n"
+                "API_URL=https://api.etherscan.io/api\n"
+                "REQUEST_DELAY=0.25\n"
+            )
+        logger.info(".env file created with default values.")
+
+
+    def ensure_env_file(self):
+        api_key = self.config.API_KEY
+
+        if not api_key or api_key.strip() == "":
+            message = "API KEY missing! Add it to .env file and restart application."
+            logger.warning(message)
+            print(f"WARNING: {message}")
 
 
     def initialize_wallets_activity(self):
@@ -79,6 +97,8 @@ class FilesChecker:
         self.ensure_file(self.config.WALLETS_ACTIVITY_FILENAME, initializer=self.initialize_wallets_activity)
         self.ensure_file(self.config.LOG_FILE)
         self.ensure_file(self.config.DB_FILENAME, initializer=self.initialize_database)
+
+        self.ensure_file('.env', initializer=self.initialize_env_file)
 
         logger.info("All files and directories are checked!")
 
