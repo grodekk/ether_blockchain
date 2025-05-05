@@ -913,12 +913,6 @@ class MultiProcessor:
         A counter for tracking the total number of processed blocks.
     progress_lock : multiprocessing.Lock
         A lock for synchronizing access to progress updates.
-
-    Methods
-    -------
-    apply_async
-    update_progress
-    start
     """
     def __init__(self):
         num_cores = cpu_count()
@@ -963,7 +957,7 @@ class MultiProcessor:
                 logger.error(f"Failed to apply async function: {e}")
                 raise RuntimeError("Failed to apply async function") from e
 
-    def update_progress(self, x, progress_callback, total_target, fetched_block_numbers, save_callback):        
+    def update_progress(self, x, progress_callback, total_target, fetched_block_numbers, save_callback, save_interval = 50):
         """       
         Updates the progress of block processing, updates the list of fetched blocks, and triggers callbacks.
 
@@ -986,6 +980,8 @@ class MultiProcessor:
             A function that takes one argument:
             - fetched_block_numbers (list): The list of block numbers that have been fetched and processed so far.
             This function is called to perform periodic actions, such as saving progress data.
+        save_interval : int, optional
+            The interval at which progress should be saved, defaults to 50
 
         Raises
         ------
@@ -997,23 +993,74 @@ class MultiProcessor:
             with self.progress_lock:           
                 block_number, progress_increment = x
             
-                if block_number is not None:                    
-                    fetched_block_numbers.append(block_number)
-                    logger.info(f"Block {block_number} added to fetched_block_numbers.")
-            
-                self.total_processed_blocks.value += progress_increment if progress_increment is not None else 0
-                progress_value = self.total_processed_blocks.value
+                self._update_block_list(block_number, fetched_block_numbers)
+
+                progress_value = self._increment_progress(progress_increment)
         
                 if progress_callback:
                     progress_callback(total_target, progress_value)
         
-                if self.total_processed_blocks.value % 50 == 0:
+                if self._should_save_progress(save_interval):
                     logger.info(f"Saving progress with {len(fetched_block_numbers)} fetched blocks.")
                     save_callback(fetched_block_numbers)
 
         except Exception as e:
             logger.error(f"Failed to update progress: {e}")
             raise RuntimeError("Failed to update progress") from e
+
+
+    @staticmethod
+    def _update_block_list(block_number, fetched_block_numbers):
+        """
+        Updates the list of processed blocks.
+
+        Parameters
+        ----------
+        block_number : int or None
+            The identifier of the block that has been processed, or None
+        fetched_block_numbers : list
+            The list where the block number will be added
+        """
+        if block_number is not None:
+            fetched_block_numbers.append(block_number)
+            logger.info(f"Block {block_number} added to fetched_block_numbers.")
+
+
+    def _increment_progress(self, increment):
+        """
+        Increments the progress counter.
+
+        Parameters
+        ----------
+        increment : int or None
+            The value to add to the progress counter, or None if no increment
+
+        Returns
+        -------
+        int
+            The current value of the progress counter
+        """
+        if increment is not None:
+            self.total_processed_blocks.value += increment
+        return self.total_processed_blocks.value
+
+
+    def _should_save_progress(self, interval=50):
+        """
+        Determines if progress should be saved based on the number of processed blocks.
+
+        Parameters
+        ----------
+        interval : int, optional
+            The interval at which progress should be saved, defaults to 50
+
+        Returns
+        -------
+        bool
+            True if progress should be saved, False otherwise
+        """
+        return self.total_processed_blocks.value % interval == 0
+
 
     def start(self, target_block_numbers, process_func, progress_callback, check_interrupt, fetched_block_numbers, save_callback):           
         """
