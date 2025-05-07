@@ -814,9 +814,11 @@ class BlockDownloader:
 
         block_data = self.block_service.fetch_block_data(block_number)
 
-        file_path = f"block_{block_number}.json"
+        self.file_manager.save_to_json(
+            block_data,
+            os.path.join(self.config.BLOCKS_DATA_DIR, f"block_{block_number}.json")
+        )
 
-        self.file_manager.save_to_json(block_data, file_path)
         fetched_block_numbers.append(block_number)
         self.file_manager.save_to_json(fetched_block_numbers, self.config.BLOCKS_DATA_FILE)
 
@@ -885,7 +887,10 @@ class BlockProcessor:
 
         block_data = self.block_service.fetch_block_data(block_number)
 
-        self.file_manager.save_to_json(block_data, f"block_{block_number}.json")
+        self.file_manager.save_to_json(
+            block_data,
+            os.path.join(self.config.BLOCKS_DATA_DIR, f"block_{block_number}.json")
+        )
 
         logger.info(f"Processing block: {block_number} finished")
 
