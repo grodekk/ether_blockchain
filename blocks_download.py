@@ -9,7 +9,7 @@ from config import Config
 from logger import logger
 from error_handler import ErrorHandler, CustomProcessingError
 from typing import Any
-
+ 
 
 class BlockInput:
     """
@@ -58,7 +58,7 @@ class BlockInput:
             raise ValueError("Invalid method, use 'console' or 'interface'.")
 
 
-    @ErrorHandler.ehd(custom_message="Maximum number of attempts reached.")
+    @ErrorHandler.ehd(custom_message="Maximum number of attempts reached.", mode="console")
     def console_input(self, max_attempts: int) -> int:
         """
         Retrieves the number of blocks to fetch via the console, allowing multiple attempts.
@@ -77,7 +77,7 @@ class BlockInput:
         while attempts < max_attempts:
             try:
                 num_blocks = self.get_user_input()
-                return self.validate_input(num_blocks)
+                return self.validate_input_console(num_blocks)
 
             except CustomProcessingError:
                 attempts += 1
@@ -98,7 +98,7 @@ class BlockInput:
         """
         num_blocks, ok_pressed = QInputDialog.getInt(None, "Number of Blocks", "Enter the number of blocks to fetch:")
         if ok_pressed:
-            self.validate_input(num_blocks)
+            self.validate_input_interface(num_blocks)
             logger.debug(f"User input for number of blocks via interface: {num_blocks}")
             return num_blocks
 
@@ -108,7 +108,7 @@ class BlockInput:
 
 
     @staticmethod
-    @ErrorHandler.ehd(custom_message="The entered value is not an integer.")
+    @ErrorHandler.ehd(custom_message="The entered value is not an integer.", mode="console")
     def get_user_input() -> int:
         """
         Prompts the user to enter the number of blocks to fetch and attempts to convert the input to an integer.
@@ -127,12 +127,58 @@ class BlockInput:
         logger.debug(f"User input: {user_input}")
         return int(user_input)
 
+    @staticmethod
+    @ErrorHandler.ehd(custom_message="Number of blocks must be greater than 0.", mode="console")
+    def validate_input_console(num_blocks: int) -> int:
+        """
+        Validates the number of blocks specifically for console input.
+
+        Parameters
+        ----------
+        num_blocks : int
+            The number of blocks to validate.
+
+        Returns
+        -------
+        int
+            The validated number of blocks.
+
+        Raises
+        ------
+        CustomProcessingError
+            Raised if the number of blocks is less than or equal to 0
+        """
+        return BlockInput._validate_input(num_blocks)
+
 
     @staticmethod
-    @ErrorHandler.ehd(custom_message="Number of blocks must be greater than 0.")
-    def validate_input(num_blocks: int) -> int:
+    @ErrorHandler.ehd(custom_message="Number of blocks must be greater than 0.", mode="interface")
+    def validate_input_interface(num_blocks: int) -> int:
         """
-        Validates that the provided number of blocks is greater than 0.
+        Validates the number of blocks specifically for GUI/interface input.
+
+        Parameters
+        ----------
+        num_blocks : int
+            The number of blocks to validate.
+
+        Returns
+        -------
+        int
+            The validated number of blocks.
+
+        Raises
+        ------
+        CustomProcessingError
+            Raised if the number of blocks is less than or equal to 0
+        """
+        return BlockInput._validate_input(num_blocks)
+
+
+    @staticmethod
+    def _validate_input(num_blocks: int) -> int:
+        """
+        Core validation logic for the number of blocks.
 
         Parameters
         ----------
