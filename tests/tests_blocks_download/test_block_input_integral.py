@@ -34,7 +34,7 @@ def test_console_input_invalid_input_decorated(block_input_console, caplog, caps
     mock_validate_input = MagicMock(side_effect=CustomProcessingError(ValueError("invalid input")))
 
     block_input_console.get_user_input = mock_get_user_input
-    block_input_console.validate_input = mock_validate_input
+    block_input_console.validate_input_console = mock_validate_input
 
     with caplog.at_level(logging.ERROR):
         with pytest.raises(CustomProcessingError, match="Maximum number of attempts reached."):
@@ -68,7 +68,7 @@ def test_get_user_input_error_decorated(mock_input, block_input_console, caplog,
 def test_validate_input_error_zero(block_input_console, caplog, capsys):
     with caplog.at_level(logging.ERROR):
         with pytest.raises(CustomProcessingError, match="Number of blocks must be greater than 0."):
-            block_input_console.validate_input(0)
+            block_input_console.validate_input_console(0)
 
     captured = capsys.readouterr()
     assert "ValueError" in caplog.text
@@ -79,7 +79,7 @@ def test_validate_input_error_zero(block_input_console, caplog, capsys):
 def test_validate_input_error_negative(block_input_console, caplog, capsys):
     with caplog.at_level(logging.ERROR):
         with pytest.raises(CustomProcessingError, match="Number of blocks must be greater than 0."):
-            block_input_console.validate_input(-1)
+            block_input_console.validate_input_console(-1)
 
     captured = capsys.readouterr()
     assert "ValueError" in caplog.text
@@ -97,7 +97,7 @@ def test_get_num_blocks_to_fetch_console_max_attempts_failed(mock_input, caplog,
         ("DEBUG", "blocks_download", "BlockInput", "get_num_blocks_to_fetch", "Attempting to get number of blocks to fetch using method: console"),
         ("DEBUG", "blocks_download", "BlockInput", "get_user_input", "User input:  "),
         ("DEBUG", "blocks_download", "BlockInput", "get_user_input", "User input: -1"),
-        ("ERROR", "blocks_download", "BlockInput", "validate_input", "Number of blocks must be greater than 0."),
+        ("ERROR", "blocks_download", "BlockInput", "validate_input_console", "Number of blocks must be greater than 0."),
         ("ERROR", "blocks_download", "BlockInput", "get_user_input", "ValueError"),
         ("ERROR", "blocks_download", "BlockInput", "console_input", "Maximum number of attempts reached.")
     ]
@@ -111,16 +111,16 @@ def test_get_num_blocks_to_fetch_console_max_attempts_failed(mock_input, caplog,
             fragment in record.message
             for record in caplog.records
         ), (
-            f"Expected log entry not found:\n"
+            f"Expected log entry not found:\n"  
             f"Level: {level}\n"
             f"Module: {module}\n"
             f"Class: {class_name}\n"
             f"Function: {func_name}\n"
             f"Message fragment: {fragment}\n"
-            f"Available logs:\n" + "\n".join(
-                f"- {r.levelname}: {r.message}" for r in caplog.records
-            )
+            f"Available logs:\n"
+            f"{''.join(f'- {r.levelname}: {r.message}\n' for r in caplog.records)}"
         )
+
 
     captured = capsys.readouterr()
 
@@ -163,9 +163,9 @@ def test_get_num_blocks_to_fetch_console_max_attempts_success(mock_input, caplog
             f"Class: {class_name}\n"
             f"Function: {func_name}\n"
             f"Message fragment: {fragment}\n"
-            f"Available logs:\n" + "\n".join(
-                f"- {r.levelname}: {r.message}" for r in caplog.records
-            )
+            f"Available logs:\n"
+            f"{''.join(f'- {r.levelname}: {r.message}\n' for r in caplog.records)}"
+
         )
 
     captured = capsys.readouterr()
