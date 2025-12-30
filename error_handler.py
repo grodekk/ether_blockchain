@@ -79,7 +79,7 @@ class ErrorHandler:
 
 
     @staticmethod
-    def ehd(context="", json_file=None, custom_message=None):
+    def ehd(context="", json_file=None, custom_message=None, mode=None):
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -99,7 +99,7 @@ class ErrorHandler:
                 except CustomProcessingError:
                     raise
                 except Exception as e:
-                    ErrorHandler().handle_custom_error(
+                    ErrorHandler(mode=mode).handle_custom_error(
                         e,
                         json_file=json_file,
                         custom_message=custom_message,
