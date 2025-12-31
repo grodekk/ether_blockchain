@@ -50,10 +50,10 @@ class TaskScheduler:
         
         try:
             self.block_processor.run_sequential_processing()
-        except cpe:                  
+        except CustomProcessingError:
             raise
         except Exception as e:            
-            cpe.handle_processing_exception(e)            
+            ErrorHandler().handle_custom_error(e)
         finally:
             logger.debug("Task ended")
             self.is_running = False
@@ -333,7 +333,7 @@ class AutomationFactory:
     @ErrorHandler.ehdc()
     def create_automator(config, start_date, update_interval=0.01, progress_callback=None, check_interrupt=None):        
         ether_api = EtherAPI(config)
-        file_manager = FileManager(config)
+        file_manager = FileManager()
         main_block_processor = MainBlockProcessor(config)      
         progress_manager = ProgressManager(config, ether_api)         
         
@@ -373,7 +373,7 @@ if __name__ == "__main__":
     config = Config()
     automator = AutomationFactory.create_automator(
         config=config,
-        start_date="2024-12-24",
+        start_date="2025-05-05",
         progress_callback=lambda total, current: print(f"progress: {current}/{total}"),
         check_interrupt=False,
     )
