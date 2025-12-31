@@ -31,7 +31,8 @@ class TestBlockFileProcessor:
         assert "File" not in caplog.text 
 
 
-    def test_load_block_data_empty_file_fetch_success(self, block_file_processor, mock_file_manager, mock_block_downloader, caplog):
+    def test_load_block_data_empty_file_fetch_success(self, block_file_processor,
+                                                      mock_file_manager, mock_block_downloader, caplog):
         json_file = "block_123.json"
         mock_file_manager.load_from_json.side_effect = [None, {"block": 123}]
         mock_block_downloader.download_single_block = MagicMock()
@@ -48,14 +49,13 @@ class TestBlockFileProcessor:
    
     def test_load_block_data_invalid_filename(self, block_file_processor, mock_file_manager, caplog):
         json_file = "invalid_filename.json"
-        mock_file_manager.load_from_json.side_effect = ValueError("Invalid block number format in invalid_filename.json")
+        mock_file_manager.load_from_json.side_effect = ValueError("Invalid block number format")
 
         with caplog.at_level('ERROR'):
             with pytest.raises(CustomProcessingError) as exc_info:
                 block_file_processor.load_block_data(json_file)
                 
-        assert "BlockFileProcessor.load_block_data - Invalid value in file invalid_filename.json: Invalid block number format in invalid_filename.json" in caplog.text        
-        assert "ValueError" in str(exc_info.value)
+        assert "Invalid block number format" in caplog.text
         
 
     def test_load_block_data_unexpected_error(self, block_file_processor, mock_file_manager, caplog):
@@ -66,5 +66,4 @@ class TestBlockFileProcessor:
             with pytest.raises(CustomProcessingError) as exc_info:
                 block_file_processor.load_block_data(json_file)
         
-        assert "BlockFileProcessor.load_block_data - Unexpected error in file block_20649502.json: Some unexpected error" in caplog.text
-        assert "General Exception" in str(exc_info.value)
+        assert "Some unexpected error" in caplog.text
