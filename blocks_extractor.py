@@ -22,7 +22,7 @@ class BlockFileProcessor:
     """    
     def __init__(self, block_downloader: BlockDownloader, file_manager: FileManager):
         self.block_downloader = block_downloader
-        self.file_manager = file_manager    
+        self.file_manager = file_manager
 
 
     def load_block_data(self, json_file: str ) -> dict:
@@ -40,14 +40,26 @@ class BlockFileProcessor:
         dict
             A dictionary containing block data.
         """
-        block_data = self.file_manager.load_from_json(json_file)                    
-        if not block_data:
-            logger.warning(f"File {json_file} is empty or corrupted. Attempting to fetch missing data.")
-            block_number = int(json_file.split('_')[1].split('.')[0])
-            self.block_downloader.download_single_block(block_number, [])
+        try:
             block_data = self.file_manager.load_from_json(json_file)
+            if not block_data:
+                logger.warning(f"File {json_file} is empty or corrupted. Attempting to fetch missing data.")
+                block_number = int(json_file.split('_')[1].split('.')[0])
+                self.block_downloader.download_single_block(block_number, [])
+                block_data = self.file_manager.load_from_json(json_file)
 
-        return block_data            
+            return block_data
+
+        except Exception as e:
+            ErrorHandler().handle_custom_error(
+                e,
+                json_file=json_file,
+                extra_info={
+                    "ex_custom_module": self.__class__.__module__,
+                    "ex_custom_className": self.__class__.__name__,
+                    "ex_custom_funcName": "load_block_data",
+                }
+            )
 
 
 class TransactionsGrouper:
