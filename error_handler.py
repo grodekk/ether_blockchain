@@ -79,7 +79,7 @@ class ErrorHandler:
 
 
     @staticmethod
-    def ehd(context="", json_file=None, custom_message=None, mode=None):
+    def ehd(context="", custom_message=None, mode=None):
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -101,7 +101,6 @@ class ErrorHandler:
                 except Exception as e:
                     ErrorHandler(mode=mode).handle_custom_error(
                         e,
-                        json_file=json_file,
                         custom_message=custom_message,
                         extra_info={
                             'ex_custom_module': module_name,
@@ -116,18 +115,18 @@ class ErrorHandler:
 
     # exception_handler_decorator_every_class_method#
     @staticmethod
-    def ehdc(context="", json_file=None):
+    def ehdc(context=""):
         def decorator(cls):
             for attr_name, attr_value in cls.__dict__.items():
                 if callable(attr_value) and not attr_name.startswith("__"):
 
                     if isinstance(attr_value, staticmethod):
                         func = attr_value.__func__
-                        decorated_func = ErrorHandler.ehd(context, json_file)(func)
+                        decorated_func = ErrorHandler.ehd(context)(func)
                         setattr(cls, attr_name, staticmethod(decorated_func))
 
                     else:
-                        decorated_method = ErrorHandler.ehd(context, json_file)(attr_value)
+                        decorated_method = ErrorHandler.ehd(context)(attr_value)
                         setattr(cls, attr_name, decorated_method)
             return cls
 
